@@ -1,20 +1,34 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
-  LayoutDashboard,
-  Bot,
-  Database,
-  Clock,
-  Settings,
-  Plus,
   Activity,
-  Shield,
-  Webhook,
+  Bot,
   ChevronDown,
   ChevronsUpDown,
+  Clock,
+  Database,
   FileCode2,
+  LayoutDashboard,
+  Plus,
+  Settings,
+  Shield,
+  Webhook,
 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -25,46 +39,16 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
-import Image from "next/image";
-import {
-  DropdownMenuItem,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { useRouter } from "next/navigation";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 
 const mainItems = [
-  {
-    title: "Dashboard",
-    url: "/",
-    icon: LayoutDashboard,
-  },
-  {
-    title: "Datasets",
-    url: "/datasets",
-    icon: Database,
-  },
-  {
-    title: "Schedules",
-    url: "/schedules",
-    icon: Clock,
-  },
-  {
-    title: "Settings",
-    url: "/settings",
-    icon: Settings,
-  },
+  { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Datasets", url: "/datasets", icon: Database },
+  { title: "Schedules", url: "/schedules", icon: Clock },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 const AppSidebar = () => {
@@ -72,7 +56,6 @@ const AppSidebar = () => {
 
   return (
     <Sidebar collapsible="icon">
-      {/* logo */}
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -87,7 +70,7 @@ const AppSidebar = () => {
                 width={30}
                 height={30}
                 loading="eager"
-                className="shrink-0 h-8 w-auto rounded-full object-cover"
+                className="h-8 w-auto shrink-0 rounded-full object-cover"
               />
               <span className="font-bold tracking-wider">CRAWLER</span>
             </SidebarMenuButton>
@@ -98,7 +81,6 @@ const AppSidebar = () => {
       <SidebarSeparator className="inset-0 ml-0" />
 
       <SidebarContent>
-        {/* Main Application */}
         <SidebarGroup>
           <SidebarGroupLabel>Overview</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -115,7 +97,6 @@ const AppSidebar = () => {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Crawlers / Scrapers */}
         <SidebarGroup>
           <SidebarGroupLabel>Scraping</SidebarGroupLabel>
           <SidebarGroupAction title="Add New Crawler">
@@ -123,13 +104,17 @@ const AppSidebar = () => {
           </SidebarGroupAction>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
+              <SidebarMenuItem className="flex items-center gap-2">
                 <SidebarMenuButton onClick={() => router.push("/crawlers")}>
                   <Bot />
                   My Crawlers
                 </SidebarMenuButton>
-                {/* Ví dụ badge báo số bot đang chạy */}
-                <SidebarMenuBadge>3 Active</SidebarMenuBadge>
+                <Badge
+                  variant="secondary"
+                  className="ml-auto rounded-full px-2 py-0"
+                >
+                  3 Active
+                </Badge>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton onClick={() => router.push("/crawlers/new")}>
@@ -140,7 +125,6 @@ const AppSidebar = () => {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Monitoring Collapse */}
         <Collapsible defaultOpen className="group/collapsible">
           <SidebarGroup>
             <SidebarGroupLabel asChild>
@@ -162,7 +146,13 @@ const AppSidebar = () => {
                   <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => router.push("/proxies")}>
                       <Shield />
-                      Proxies / IPs
+                      <span>Proxies / IPs</span>
+                      <Badge
+                        variant="outline"
+                        className="ml-auto rounded-full px-2 py-0"
+                      >
+                        ACTIVE
+                      </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
@@ -171,7 +161,6 @@ const AppSidebar = () => {
           </SidebarGroup>
         </Collapsible>
 
-        {/* Integrations Collapse */}
         <Collapsible defaultOpen className="group/collapsible">
           <SidebarGroup>
             <SidebarGroupLabel asChild>
@@ -228,7 +217,7 @@ const AppSidebar = () => {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-50">
                 <DropdownMenuItem>Account</DropdownMenuItem>
-                <DropdownMenuItem>Billing</DropdownMenuItem>
+                <DropdownMenuItem>Setting</DropdownMenuItem>
                 <DropdownMenuItem>Sign out</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

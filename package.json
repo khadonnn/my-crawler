@@ -10,9 +10,9 @@
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "db:generate": "turbo run db:generate --filter=@scraping-platform/db",
-    "db:migrate": "turbo run db:migrate --filter=@scraping-platform/db",
-    "db:studio": "turbo run db:studio --filter=@scraping-platform/db"
+    "db:generate": "npm --workspace @scraping-platform/db run db:generate",
+    "db:migrate": "npm --workspace @scraping-platform/db run db:migrate",
+    "db:studio": "npm --workspace @scraping-platform/db run db:studio"
   },
   "devDependencies": {
     "turbo": "^2.5.8"
