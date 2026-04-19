@@ -1,1 +1,1 @@
-export { getPrisma } from "./prisma";
+export { getPrisma, prisma } from "./prisma.ts";

@@ -28,6 +28,7 @@ export function NewCrawlerForm({
   >("PROFILE_AND_POST");
   const [proxyRegion, setProxyRegion] = useState<"ANY" | "VN" | "US">("ANY");
   const [schedule, setSchedule] = useState("");
+  const [debugMode, setDebugMode] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -52,6 +53,7 @@ export function NewCrawlerForm({
           scrapeMode,
           proxyRegion,
           schedule: schedule.trim() || undefined,
+          debugMode,
         }),
       });
 
@@ -67,6 +69,7 @@ export function NewCrawlerForm({
       setScrapeMode("PROFILE_AND_POST");
       setProxyRegion("ANY");
       setSchedule("");
+      setDebugMode(false);
       onSuccess?.(payload.jobId);
     } catch (error) {
       toast.error(
@@ -164,6 +167,17 @@ export function NewCrawlerForm({
           </select>
         </div>
       </div>
+
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input
+          type="checkbox"
+          className="size-4 rounded border"
+          checked={debugMode}
+          onChange={(event) => setDebugMode(event.target.checked)}
+          disabled={loading}
+        />
+        Bat Debug Mode (luu screenshot + raw extract)
+      </label>
 
       <Button type="submit" disabled={loading} className="w-full">
         {loading ? "Dang tao job..." : submitLabel}

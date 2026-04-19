@@ -3,12 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { rerunCrawlerJob } from "@/lib/server/jobs";
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ jobId: string }> },
 ) {
   try {
+    const body = (await request.json().catch(() => ({}))) as {
+      debugMode?: boolean;
+    };
     const { jobId } = await context.params;
-    const created = await rerunCrawlerJob(jobId);
+    const created = await rerunCrawlerJob(jobId, {
+      debugMode: body.debugMode,
+    });
 
     return NextResponse.json(
       {

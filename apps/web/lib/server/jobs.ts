@@ -8,18 +8,22 @@ type CreateCrawlerJobInput = {
   scrapeMode?: "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST";
   proxyRegion?: "ANY" | "VN" | "US";
   schedule?: string;
+  debugMode?: boolean;
 };
 
 export type JobListItem = {
   id: string;
+  workerJobId: string | null;
   sourceType: string;
   sourceValue: string;
   keyword: string | null;
+  debugMode: boolean;
   status: string;
   progress: number;
   leadCount: number;
   processedCount: number;
   errorMessage: string | null;
+  blockedReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -65,30 +69,11 @@ export async function createCrawlerJob(input: CreateCrawlerJobInput) {
   const scrapeMode = input.scrapeMode ?? "PROFILE_AND_POST";
   const proxyRegion = input.proxyRegion ?? "ANY";
   const schedule = normalizeOptionalText(input.schedule);
+  const debugMode = Boolean(input.debugMode);
 
   if (!url || !/^https?:\/\//.test(url)) {
     throw new Error("URL khong hop le");
   }
-
-  const workerResponse = await fetch(`${getWorkerUrl()}/api/scrape`, {
-    method: "POST",
-    headers: buildWorkerHeaders(),
-    body: JSON.stringify({
-      url,
-      keyword,
-      scrapeMode,
-      proxyRegion,
-      schedule,
-    }),
-  });
-
-  if (!workerResponse.ok) {
-    throw new Error(await parseWorkerError(workerResponse));
-  }
-
-  const workerData = (await workerResponse.json()) as {
-    jobId?: string;
-  };
 
   const prisma = getPrisma();
   const job = await prisma.job.create({
@@ -98,13 +83,59 @@ export async function createCrawlerJob(input: CreateCrawlerJobInput) {
       keyword: keyword ?? null,
       status: "PENDING",
       progress: 0,
+      debugMode,
     },
   });
 
-  return {
-    job,
-    workerId: workerData.jobId ?? null,
-  };
+  try {
+    const workerResponse = await fetch(`${getWorkerUrl()}/api/scrape`, {
+      method: "POST",
+      headers: buildWorkerHeaders(),
+      body: JSON.stringify({
+        url,
+        keyword,
+        scrapeMode,
+        proxyRegion,
+        schedule,
+        debugMode,
+        clientJobId: job.id,
+      }),
+    });
+
+    if (!workerResponse.ok) {
+      throw new Error(await parseWorkerError(workerResponse));
+    }
+
+    const workerData = (await workerResponse.json()) as {
+      jobId?: string;
+    };
+
+    const updatedJob = await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        workerJobId: workerData.jobId ?? null,
+      },
+    });
+
+    return {
+      job: updatedJob,
+      workerId: workerData.jobId ?? null,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Khong the dispatch worker";
+
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        status: "FAILED",
+        errorMessage: message,
+        finishedAt: new Date(),
+      },
+    });
+
+    throw error;
+  }
 }
 
 export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
@@ -116,14 +147,17 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
       take: limit,
       select: {
         id: true,
+        workerJobId: true,
         sourceType: true,
         sourceValue: true,
         keyword: true,
+        debugMode: true,
         status: true,
         progress: true,
         leadCount: true,
         processedCount: true,
         errorMessage: true,
+        blockedReason: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -155,14 +189,17 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
 
     return {
       id: job.id,
+      workerJobId: job.workerJobId,
       sourceType: job.sourceType,
       sourceValue: job.sourceValue,
       keyword: job.keyword,
+      debugMode: job.debugMode,
       status: job.status,
       progress: job.progress,
       leadCount: Math.max(job.leadCount, observedLeadCount),
       processedCount: job.processedCount,
       errorMessage: job.errorMessage,
+      blockedReason: job.blockedReason,
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt.toISOString(),
     };
@@ -187,13 +224,17 @@ export async function stopCrawlerJob(jobId: string) {
   return result.count > 0;
 }
 
-export async function rerunCrawlerJob(jobId: string) {
+export async function rerunCrawlerJob(
+  jobId: string,
+  options?: { debugMode?: boolean },
+) {
   const prisma = getPrisma();
   const existing = await prisma.job.findUnique({
     where: { id: jobId },
     select: {
       sourceValue: true,
       keyword: true,
+      debugMode: true,
     },
   });
 
@@ -204,5 +245,6 @@ export async function rerunCrawlerJob(jobId: string) {
   return createCrawlerJob({
     url: existing.sourceValue,
     keyword: existing.keyword ?? undefined,
+    debugMode: options?.debugMode ?? existing.debugMode,
   });
 }

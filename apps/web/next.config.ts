@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   devIndicators: {
     position: "bottom-right",
   },
+  transpilePackages: ["@scraping-platform/db", "@scraping-platform/shared"],
 };
 
 export default nextConfig;

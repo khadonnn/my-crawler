@@ -1,11 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { TooltipProps } from "recharts";
 
 import { cn } from "@/lib/utils";
 
 export type ChartConfig = Record<string, { label: string; color: string }>;
+
+type ChartTooltipContentProps = {
+  active?: boolean;
+  payload?: Array<{
+    dataKey?: string | number;
+    value?: number;
+  }>;
+};
 
 const ChartContext = React.createContext<ChartConfig | null>(null);
 
@@ -38,7 +45,7 @@ function ChartContainer({
 function ChartTooltipContent({
   active,
   payload,
-}: TooltipProps<number, string>) {
+}: ChartTooltipContentProps) {
   const config = useChartConfig();
 
   if (!active || !payload || payload.length === 0) {

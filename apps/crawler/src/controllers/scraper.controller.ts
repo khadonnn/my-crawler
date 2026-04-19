@@ -6,7 +6,11 @@ import { scraperService } from "../services/scraper.service.js";
  * Validates the URL and initiates a scrape job
  */
 export async function handleScrape(req: Request, res: Response): Promise<void> {
-  const { url } = req.body;
+  const { url, debugMode, clientJobId } = req.body as {
+    url?: string;
+    debugMode?: boolean;
+    clientJobId?: string;
+  };
 
   // Validate URL format
   if (!url || !/^https?:\/\//.test(url)) {
@@ -15,7 +19,10 @@ export async function handleScrape(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const jobId = await scraperService.addScrapeJob(url);
+    const jobId = await scraperService.addScrapeJob(url, {
+      debugMode,
+      clientJobId,
+    });
 
     res.status(202).json({
       success: true,
@@ -51,6 +58,6 @@ export function handleStatus(req: Request, res: Response): void {
  * Handle GET /api/health requests
  * Returns the health status of the service
  */
-export function handleHealth(req: Request, res: Response): void {
+export function handleHealth(_req: Request, res: Response): void {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 }

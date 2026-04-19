@@ -5,3 +5,5 @@ export type JobStatus =
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED";
+
+export * from "./types/scraper.js";

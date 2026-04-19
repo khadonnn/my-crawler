@@ -13,10 +13,13 @@
 - Proxy import UX now uses toast notifications and closes modal on successful response; proxy list screen now surfaces `/api/proxies` fetch errors with retry.
 - Crawlers management console is now live on `/crawlers` with advanced create form, job history table, and actions for rerun/stop/view-data.
 - Jobs API surface has been extended with listing and control endpoints: `/api/jobs`, `/api/jobs/[jobId]/rerun`, `/api/jobs/[jobId]/stop`.
+- Multi-platform architecture direction has been documented in `.docs/crawler-plans/07-multi-platform-strategy-refactor.md`.
+- Observability phase is now wired into the crawler worker with structured job logs, debug screenshots, raw extract artifacts, and retention cleanup.
+- Per-job `debugMode` is now plumbed from Web UI/API to Worker execution (including optional rerun override).
 
 ## Next Step
 
-- Connect worker execution lifecycle back to database jobs for true status/progress synchronization (PENDING/RUNNING/COMPLETED/FAILED) and richer dataset drill-down.
+- Add Prisma fields/tables for debug artifacts (screenshot/rawExtract paths, debug flags, blocked reason) and start syncing worker status back to DB lifecycle.
 
 ## Notes for Resume
 

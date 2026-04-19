@@ -10,6 +10,7 @@ export async function POST(request: NextRequest) {
       scrapeMode?: "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST";
       proxyRegion?: "ANY" | "VN" | "US";
       schedule?: string;
+      debugMode?: boolean;
     };
     const { url } = body;
 
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
       scrapeMode: body.scrapeMode,
       proxyRegion: body.proxyRegion,
       schedule: body.schedule,
+      debugMode: body.debugMode,
     });
 
     return NextResponse.json(

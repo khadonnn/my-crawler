@@ -73,3 +73,12 @@
 - Added `apps/web`, `apps/crawler`, `packages/db`, and `packages/shared` scaffolds.
 - Added PostgreSQL Docker Compose for local development.
 - Introduced Prisma schema groundwork for jobs, posts, profiles, and interactions.
+
+## Crawler Observability + Strategy Refactor
+
+- Split the crawler execution flow into platform strategies with a factory router.
+- Added shared scraper contracts in `packages/shared` for request/result typing.
+- Added crawler observability helpers for structured logs, debug screenshots, raw extracts, and retention cleanup.
+- Added a Facebook PoC entrypoint under `apps/crawler/pocs/` and a `poc:facebook` script.
+- Verified the crawler package builds successfully after the refactor and observability wiring.
+- Wired `debugMode` end-to-end from web crawler form -> jobs API -> worker `/api/scrape` -> scraper execution, with optional rerun override payload.
