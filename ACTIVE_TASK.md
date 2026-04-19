@@ -5,10 +5,11 @@
 - External file-based memory system initialized for the Scraping Platform MVP.
 - Scraper Worker architecture is documented under `.docs/system-design/`.
 - Implementation plans are tracked under `.docs/crawler-plans/`.
+- Frontend routing and hydration issues in the dashboard shell were stabilized.
 
 ## Next Step
 
-- Start the Next.js dashboard plan only after the plan is approved and the worker API contract stays unchanged.
+- Continue building real content for the newly created dashboard pages while preserving the worker API contract.
 
 ## Notes for Resume
 
