@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  # Dịch vụ Crawler (Worker)
+  crawler:
+    build:
+      context: ./my-crawler
+      dockerfile: Dockerfile
+    ports:
+      - "10000:10000"
+    environment:
+      - PORT=10000
+      - CRAWLER_API_KEY=${CRAWLER_API_KEY}
+      - DATABASE_URL=postgresql://user:pass@db:5432/scraping_db
+    depends_on:
+      - db
+
+  # Dịch vụ Dashboard (Next.js)
+  dashboard:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_WORKER_URL=http://localhost:10000
+    depends_on:
+      - crawler
+
+  # Dịch vụ Database (PostgreSQL)
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: scraping_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

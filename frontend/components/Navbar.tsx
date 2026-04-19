@@ -32,7 +32,7 @@ const Navbar = () => {
         <DropdownMenu>
           <DropdownMenuTrigger>
             <Avatar className="cursor-pointer">
-              <AvatarImage src="https://avatars.githubusercontent.com/u/146587461?v=4&size=64" />
+              <AvatarImage src="/images/avatar.png" />
               <AvatarFallback>CN</AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>

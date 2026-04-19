@@ -31,10 +31,12 @@ export default async function RootLayout({
   const defaultOpen = cookieStore.get("sidebar_state")?.value === "true";
 
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${inter.variable} ${geistMono.variable} flex antialiased`}
-      >
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${inter.variable} ${geistMono.variable}`}
+    >
+      <body className="flex antialiased font-sans">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

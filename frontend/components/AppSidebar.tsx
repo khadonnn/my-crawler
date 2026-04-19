@@ -86,6 +86,7 @@ const AppSidebar = () => {
                 alt="logo"
                 width={30}
                 height={30}
+                loading="eager"
                 className="shrink-0 h-8 w-auto rounded-full object-cover"
               />
               <span className="font-bold tracking-wider">CRAWLER</span>
@@ -213,6 +214,7 @@ const AppSidebar = () => {
                     alt="avatar"
                     width={20}
                     height={20}
+                    loading="eager"
                     className="h-10 w-10 shrink-0 rounded-lg border border-gray-700/20 object-cover dark:border-gray-200/20"
                   />
                   <div className="grid flex-1 text-left text-sm leading-tight">
