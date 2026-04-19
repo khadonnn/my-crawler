@@ -9,10 +9,12 @@
 - Dashboard home page has been upgraded to a Bento command center with KPI cards, charts, running task monitor, and quick launch.
 - Web APIs for dashboard telemetry are in place: worker health, proxy health, and aggregated dashboard metrics.
 - Prisma schema now includes a `Proxy` model for proxy pool monitoring.
+- Proxy bulk import now supports paste-and-import for `ip:port:user:pass` lists, including semicolon-delimited input and duplicate-safe bulk insert.
+- Proxy import UX now uses toast notifications and closes modal on successful response; proxy list screen now surfaces `/api/proxies` fetch errors with retry.
 
 ## Next Step
 
-- Add Proxy management flows (seed/check/update status), then connect running jobs to true progress updates from worker execution.
+- Extend Proxy management with smarter validation/normalization (protocol/auth edge cases), then connect running jobs to true progress updates from worker execution.
 
 ## Notes for Resume
 

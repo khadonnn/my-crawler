@@ -12,31 +12,30 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Plus } from "lucide-react";
 import { useState } from "react";
-
-interface BulkImportResult {
-  imported: number;
-  failed: number;
-  results: unknown[];
-  errors: Record<string, string>[];
-}
+import { toast } from "sonner";
 
 export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<BulkImportResult | null>(null);
+
+  type BulkImportResponse = {
+    imported: number;
+    failed: number;
+    error?: string;
+  };
 
   async function handleImport() {
     if (!text.trim()) {
-      alert("Vui long nhap danh sach proxy");
+      toast.error("Vui long nhap danh sach proxy");
       return;
     }
 
     setLoading(true);
     const proxyList = text
-      .trim()
-      .split("\n")
-      .filter((line) => line.trim());
+      .split(/[\r\n;]+/g)
+      .map((line) => line.trim())
+      .filter(Boolean);
 
     try {
       const res = await fetch("/api/proxies/bulk-import", {
@@ -45,19 +44,26 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
         body: JSON.stringify({ proxyList }),
       });
 
-      const data = await res.json();
-      setResult(data);
+      const data = (await res.json()) as BulkImportResponse;
+      if (!res.ok) {
+        throw new Error(data?.error || "Import that bai");
+      }
 
       if (data.imported > 0) {
-        setText("");
-        setTimeout(() => {
-          setOpen(false);
-          setResult(null);
-          onSuccess?.();
-        }, 1500);
+        toast.success(`Nhap thanh cong ${data.imported} proxy`);
+      } else {
+        toast("Khong co proxy moi de import");
       }
+
+      if (data.failed > 0) {
+        toast(`${data.failed} dong khong hop le hoac bi trung`);
+      }
+
+      setText("");
+      setOpen(false);
+      onSuccess?.();
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Import that bai");
+      toast.error(error instanceof Error ? error.message : "Import that bai");
     } finally {
       setLoading(false);
     }
@@ -87,18 +93,6 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
             className="h-32"
             disabled={loading}
           />
-          {result ? (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950">
-              <p className="font-medium">
-                ✓ Nhap thanh cong: {result.imported} proxy
-              </p>
-              {result.failed > 0 && (
-                <p className="text-xs text-orange-600">
-                  Loi: {result.failed} proxy
-                </p>
-              )}
-            </div>
-          ) : null}
           <div className="flex gap-2">
             <Button
               onClick={handleImport}
@@ -110,7 +104,6 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
             <Button
               onClick={() => {
                 setOpen(false);
-                setResult(null);
               }}
               variant="outline"
             >

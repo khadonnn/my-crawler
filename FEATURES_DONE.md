@@ -13,6 +13,20 @@
 - Replaced the default starter home content to remove the `vercel.svg` image ratio warning.
 - Added missing Next.js routes for sidebar navigation paths: `/crawlers`, `/crawlers/new`, `/datasets`, `/schedules`, `/settings`, `/logs`, `/proxies`, `/api-keys`, and `/webhooks`.
 
+## Proxy Bulk Import (Paste-and-Import)
+
+- Completed end-to-end bulk import flow from proxy paste input to database insert.
+- Updated API route `/api/proxies/bulk-import` to parse `ip:port:user:pass`, support semicolon/newline separated input, and insert in bulk with Prisma `createMany({ skipDuplicates: true })`.
+- Added robust failure accounting for invalid rows and duplicate rows skipped by the database.
+- Updated import dialog preprocessing so pasted lists with `;` delimiters are accepted without manual cleanup.
+
+## Proxy Import UX + Reliability Fix
+
+- Replaced alert-based feedback with toast notifications using `sonner`.
+- Fixed import dialog behavior: only treats HTTP success as success and closes modal after successful import response.
+- Added fallback insert path when Prisma `createMany` fails unexpectedly, reducing 500 errors during bulk import.
+- Added explicit error state + retry action in proxy table when `/api/proxies` returns 500.
+
 ## Dashboard Command Center (Bento + Charts)
 
 - Replaced the home page with a Bento-style command center layout on `/`.

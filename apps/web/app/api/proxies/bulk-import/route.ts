@@ -1,78 +1,141 @@
 import { getPrisma } from "@scraping-platform/db";
-import { NextRequest, NextResponse } from "next/server";
+import { checkProxyHealth } from "@/lib/server/proxy-health";
+import { NextResponse } from "next/server";
 
-export async function POST(request: NextRequest) {
+export const runtime = "nodejs";
+
+type ParsedProxy = {
+  address: string;
+  port: number;
+  username: string | null;
+  password: string | null;
+  status: "UNKNOWN";
+};
+
+function deduplicateRows(rows: ParsedProxy[]): ParsedProxy[] {
+  const unique = new Map<string, ParsedProxy>();
+
+  for (const row of rows) {
+    unique.set(`${row.address}:${row.port}`, row);
+  }
+
+  return Array.from(unique.values());
+}
+
+function normalizeProxyList(proxyList: unknown): string[] {
+  if (!Array.isArray(proxyList)) {
+    return [];
+  }
+
+  return proxyList
+    .filter((item): item is string => typeof item === "string")
+    .flatMap((item) => item.split(/[\r\n;]+/g))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseProxyLine(line: string): ParsedProxy | null {
+  const parts = line.split(":").map((part) => part.trim());
+
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const [address, portRaw, usernameRaw, passwordRaw] = parts;
+  const port = Number.parseInt(portRaw, 10);
+
+  if (!address || Number.isNaN(port)) {
+    return null;
+  }
+
+  return {
+    address,
+    port,
+    username: usernameRaw || null,
+    password: passwordRaw || null,
+    status: "UNKNOWN",
+  };
+}
+
+export async function POST(req: Request) {
   try {
+    const { proxyList } = await req.json();
     const prisma = getPrisma();
-    const body = await request.json();
-    const { proxyList } = body;
 
-    if (!Array.isArray(proxyList) || proxyList.length === 0) {
+    const normalizedLines = normalizeProxyList(proxyList);
+    if (normalizedLines.length === 0) {
       return NextResponse.json(
-        { error: "proxyList must be a non-empty array" },
+        { error: "proxyList must be a non-empty array of proxy strings" },
         { status: 400 },
       );
     }
 
-    const results = [];
-    const errors = [];
+    let invalidCount = 0;
+    const parsedRows = normalizedLines
+      .map((line) => {
+        const parsed = parseProxyLine(line);
+        if (!parsed) {
+          invalidCount += 1;
+        }
+        return parsed;
+      })
+      .filter((row): row is ParsedProxy => row !== null);
 
-    for (const proxyStr of proxyList) {
-      const parts = proxyStr.trim().split(":");
+    const uniqueRows = deduplicateRows(parsedRows);
 
-      if (parts.length < 2) {
-        errors.push({
-          proxy: proxyStr,
-          error: "Invalid format (need ip:port[:user[:pass]])",
-        });
-        continue;
-      }
-
-      const [address, portStr, username, password] = parts;
-      const port = parseInt(portStr, 10);
-
-      if (isNaN(port)) {
-        errors.push({ proxy: proxyStr, error: "Invalid port number" });
-        continue;
-      }
-
+    let imported = 0;
+    if (uniqueRows.length > 0) {
       try {
-        const proxy = await prisma.proxy.upsert({
-          where: { address_port: { address, port } },
-          update: { username: username || null, password: password || null },
-          create: {
-            address,
-            port,
-            username: username || null,
-            password: password || null,
-          },
+        const result = await prisma.proxy.createMany({
+          data: uniqueRows,
+          skipDuplicates: true,
         });
-
-        results.push(proxy);
-      } catch (err) {
-        errors.push({
-          proxy: proxyStr,
-          error: err instanceof Error ? err.message : "Database error",
-        });
+        imported = result.count;
+      } catch {
+        // Fallback for environments where bulk insert may fail unexpectedly.
+        for (const row of uniqueRows) {
+          try {
+            await prisma.proxy.create({ data: row });
+            imported += 1;
+          } catch {
+            // Ignore row-level insert errors (often duplicates).
+          }
+        }
       }
     }
 
-    return NextResponse.json(
-      {
-        imported: results.length,
-        failed: errors.length,
-        results,
-        errors,
+    const failed = invalidCount + (uniqueRows.length - imported);
+
+    // Auto-check newly imported (and matching existing) proxies so UI can show WORKING/DEAD quickly.
+    const candidates = await prisma.proxy.findMany({
+      where: {
+        OR: uniqueRows.map((row) => ({ address: row.address, port: row.port })),
       },
-      { status: 200 },
-    );
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to import proxies",
-      },
-      { status: 500 },
-    );
+      select: { id: true, address: true, port: true },
+    });
+
+    let checked = 0;
+    for (const proxy of candidates) {
+      const health = await checkProxyHealth(proxy.address, proxy.port);
+      await prisma.proxy.update({
+        where: { id: proxy.id },
+        data: {
+          status: health.status,
+          latency: health.latency,
+          lastChecked: new Date(),
+        },
+      });
+      checked += 1;
+    }
+
+    return NextResponse.json({
+      imported,
+      failed,
+      checked,
+      results: [],
+      errors: [],
+    });
+  } catch {
+    return NextResponse.json({ error: "Loi Server" }, { status: 500 });
   }
 }

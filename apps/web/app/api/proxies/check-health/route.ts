@@ -1,5 +1,8 @@
 import { getPrisma } from "@scraping-platform/db";
+import { checkProxyHealth } from "@/lib/server/proxy-health";
 import { NextRequest, NextResponse } from "next/server";
+
+export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,28 +24,13 @@ export async function POST(request: NextRequest) {
     const updates = [];
 
     for (const proxy of proxies) {
-      let status = "UNKNOWN";
-
-      try {
-        const testResponse = await fetch("http://example.com", {
-          method: "HEAD",
-          ...(proxy.username && {
-            headers: {
-              "Proxy-Authorization": `Basic ${Buffer.from(`${proxy.username}:${proxy.password || ""}`).toString("base64")}`,
-            },
-          }),
-          timeout: 5000,
-        }).catch(() => null);
-
-        status = testResponse && testResponse.ok ? "WORKING" : "DEAD";
-      } catch {
-        status = "DEAD";
-      }
+      const health = await checkProxyHealth(proxy.address, proxy.port);
 
       const updated = await prisma.proxy.update({
         where: { id: proxy.id },
         data: {
-          status,
+          status: health.status,
+          latency: health.latency,
           lastChecked: new Date(),
         },
       });

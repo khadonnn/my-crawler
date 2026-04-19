@@ -6,6 +6,7 @@ import Navbar from "@/components/Navbar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { cookies } from "next/headers";
+import { Toaster } from "sonner";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -45,6 +46,7 @@ export default async function RootLayout({
               <div className="px-4"> {children}</div>
             </main>
           </SidebarProvider>
+          <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>
     </html>

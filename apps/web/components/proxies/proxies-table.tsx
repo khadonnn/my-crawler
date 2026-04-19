@@ -19,7 +19,18 @@ interface Proxy {
 
 const fetcher = async <T,>(url: string): Promise<T> => {
   const res = await fetch(url);
-  if (!res.ok) throw new Error("Failed to fetch");
+  if (!res.ok) {
+    let message = "Failed to fetch";
+    try {
+      const payload = (await res.json()) as { error?: string };
+      if (payload.error) {
+        message = payload.error;
+      }
+    } catch {
+      // Keep default message when body is not JSON.
+    }
+    throw new Error(message);
+  }
   return res.json() as Promise<T>;
 };
 
@@ -27,6 +38,7 @@ export function ProxiesTable() {
   const {
     data: proxies,
     isLoading,
+    error,
     mutate,
   } = useSWR<Proxy[]>("/api/proxies", fetcher, {
     refreshInterval: 5000,
@@ -74,6 +86,22 @@ export function ProxiesTable() {
         <Skeleton className="h-10 w-full" />
         <Skeleton className="h-10 w-full" />
       </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="space-y-3 pt-6 text-center">
+          <p className="text-sm text-destructive">
+            Loi tai du lieu proxy:{" "}
+            {String(error instanceof Error ? error.message : "Unknown error")}
+          </p>
+          <Button size="sm" variant="outline" onClick={() => mutate()}>
+            Thu lai
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
