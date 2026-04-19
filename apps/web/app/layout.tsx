@@ -36,13 +36,8 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={`${inter.variable} ${geistMono.variable}`}
     >
-      <body className="flex antialiased font-sans">
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
+      <body className="flex antialiased font-sans" suppressHydrationWarning>
+        <ThemeProvider>
           <SidebarProvider defaultOpen={defaultOpen}>
             <AppSidebar />
             <main className="w-full">

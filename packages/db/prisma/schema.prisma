@@ -116,3 +116,18 @@ model Interaction {
   @@index([postId])
   @@index([type])
 }
+
+model Proxy {
+  id          String   @id @default(uuid())
+  address     String
+  port        Int
+  username    String?
+  password    String?
+  protocol    String   @default("http")
+  status      String   @default("UNKNOWN")
+  latency     Int      @default(0)
+  lastChecked DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@unique([address, port])
+}

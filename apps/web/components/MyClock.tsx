@@ -7,9 +7,13 @@ const CustomClock = ({
   timezone = "UTC",
   ticking = false,
 }) => {
-  const [time, setTime] = useState(new Date());
+  const [time, setTime] = useState<Date | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+    setTime(new Date());
+
     if (!ticking) return;
 
     const interval = setInterval(() => {
@@ -21,6 +25,8 @@ const CustomClock = ({
 
   // Format the time according to the specified timezone
   const formatTimeWithTimezone = () => {
+    if (!time) return "--:--:--";
+
     // Create options for toLocaleString based on format
     const options = {
       timeZone: timezone,
@@ -43,20 +49,14 @@ const CustomClock = ({
     return dateObj.toLocaleTimeString();
   };
 
+  if (!mounted) {
+    return <span suppressHydrationWarning>--:--:--</span>;
+  }
+
   return <span>{formatTimeWithTimezone()}</span>;
 };
 
 export default function MyClock() {
-  const [isMounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!isMounted) {
-    return <span>Loading...</span>;
-  }
-
   return (
     <div className="dark:bg-primary-foreground rounded-md border border-gray-700/10 bg-gray-100 px-2 py-1 font-mono text-black dark:border-gray-200/10 dark:text-white">
       <CustomClock

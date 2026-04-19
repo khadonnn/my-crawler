@@ -6,10 +6,13 @@
 - Scraper Worker architecture is documented under `.docs/system-design/`.
 - Monorepo scaffold has been created with `apps/web`, `apps/crawler`, `packages/db`, and `packages/shared`.
 - PostgreSQL Docker and Turbo workspace orchestration are now in place.
+- Dashboard home page has been upgraded to a Bento command center with KPI cards, charts, running task monitor, and quick launch.
+- Web APIs for dashboard telemetry are in place: worker health, proxy health, and aggregated dashboard metrics.
+- Prisma schema now includes a `Proxy` model for proxy pool monitoring.
 
 ## Next Step
 
-- Wire Prisma to the real database, migrate existing dashboard and worker code into the new workspace packages, and keep the worker API contract stable.
+- Add Proxy management flows (seed/check/update status), then connect running jobs to true progress updates from worker execution.
 
 ## Notes for Resume
 
