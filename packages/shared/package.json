@@ -1,0 +1,12 @@
+{
+  "name": "@scraping-platform/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "lint": "echo \"No lint configured yet\"",
+    "build": "echo \"No build step for shared package\""
+  }
+}
