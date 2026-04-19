@@ -11,10 +11,12 @@
 - Prisma schema now includes a `Proxy` model for proxy pool monitoring.
 - Proxy bulk import now supports paste-and-import for `ip:port:user:pass` lists, including semicolon-delimited input and duplicate-safe bulk insert.
 - Proxy import UX now uses toast notifications and closes modal on successful response; proxy list screen now surfaces `/api/proxies` fetch errors with retry.
+- Crawlers management console is now live on `/crawlers` with advanced create form, job history table, and actions for rerun/stop/view-data.
+- Jobs API surface has been extended with listing and control endpoints: `/api/jobs`, `/api/jobs/[jobId]/rerun`, `/api/jobs/[jobId]/stop`.
 
 ## Next Step
 
-- Extend Proxy management with smarter validation/normalization (protocol/auth edge cases), then connect running jobs to true progress updates from worker execution.
+- Connect worker execution lifecycle back to database jobs for true status/progress synchronization (PENDING/RUNNING/COMPLETED/FAILED) and richer dataset drill-down.
 
 ## Notes for Resume
 

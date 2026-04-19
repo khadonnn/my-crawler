@@ -50,6 +50,23 @@
 - Implemented quick launch action to send instant scrape requests to Worker API.
 - Extended Prisma schema with `Proxy` model and regenerated Prisma Client.
 
+## Crawlers Management Console
+
+- Replaced placeholder `/crawlers` page with a full management console for distributed job operations.
+- Added advanced crawler creation form with detailed options:
+  - URL
+  - Keywords
+  - Crawl scope (Profile only / Post only / Profile + Post)
+  - Proxy region (ANY / VN / US)
+  - Schedule expression
+- Added jobs control APIs in web app:
+  - `GET /api/jobs`
+  - `POST /api/jobs`
+  - `POST /api/jobs/[jobId]/rerun`
+  - `POST /api/jobs/[jobId]/stop`
+- Refactored existing quick-launch backend route `/api/jobs/create` to share the same orchestration helper with advanced create.
+- Added "View Data" navigation from job rows to `/datasets?jobId=<id>` and updated dataset page to surface selected job context.
+
 ## Monorepo Scaffold
 
 - Created a root Turborepo workspace with npm workspaces.

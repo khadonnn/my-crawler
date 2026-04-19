@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createCrawlerJob } from "@/lib/server/jobs";
+import { createCrawlerJob, listCrawlerJobs } from "@/lib/server/jobs";
+
+export async function GET() {
+  try {
+    const jobs = await listCrawlerJobs(150);
+    return NextResponse.json(jobs);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to fetch jobs";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,14 +22,13 @@ export async function POST(request: NextRequest) {
       proxyRegion?: "ANY" | "VN" | "US";
       schedule?: string;
     };
-    const { url } = body;
 
-    if (!url || !/^https?:\/\//.test(url)) {
-      return NextResponse.json({ error: "URL không hợp lệ" }, { status: 400 });
+    if (!body.url) {
+      return NextResponse.json({ error: "URL khong hop le" }, { status: 400 });
     }
 
     const created = await createCrawlerJob({
-      url,
+      url: body.url,
       keyword: body.keyword,
       scrapeMode: body.scrapeMode,
       proxyRegion: body.proxyRegion,
