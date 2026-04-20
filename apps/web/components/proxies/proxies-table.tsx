@@ -12,6 +12,7 @@ interface Proxy {
   id: string;
   address: string;
   port: number;
+  region?: "ANY" | "VN" | "US";
   status: string;
   latency: number;
   createdAt: string;
@@ -125,6 +126,7 @@ export function ProxiesTable() {
             <tr>
               <th className="px-4 py-3 text-left font-medium">Address</th>
               <th className="px-4 py-3 text-left font-medium">Port</th>
+              <th className="px-4 py-3 text-left font-medium">Region</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-left font-medium">Latency</th>
               <th className="px-4 py-3 text-left font-medium">Created</th>
@@ -148,6 +150,9 @@ export function ProxiesTable() {
                     {proxy.address}
                   </td>
                   <td className="px-4 py-3 font-mono">{proxy.port}</td>
+                  <td className="px-4 py-3">
+                    <Badge variant="outline">{proxy.region ?? "ANY"}</Badge>
+                  </td>
                   <td className="px-4 py-3">
                     <Badge className={statusColor}>
                       <Icon className="mr-1 size-3" />

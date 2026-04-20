@@ -6,10 +6,11 @@ import { scraperService } from "../services/scraper.service.js";
  * Validates the URL and initiates a scrape job
  */
 export async function handleScrape(req: Request, res: Response): Promise<void> {
-  const { url, debugMode, clientJobId } = req.body as {
+  const { url, debugMode, clientJobId, proxyRegion } = req.body as {
     url?: string;
     debugMode?: boolean;
     clientJobId?: string;
+    proxyRegion?: "ANY" | "VN" | "US";
   };
 
   // Validate URL format
@@ -22,6 +23,7 @@ export async function handleScrape(req: Request, res: Response): Promise<void> {
     const jobId = await scraperService.addScrapeJob(url, {
       debugMode,
       clientJobId,
+      proxyRegion,
     });
 
     res.status(202).json({

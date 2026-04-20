@@ -28,10 +28,11 @@
 - Datasets UI now supports end-to-end `View Reactions` flow with auto-trigger crawl and refetch-after-completion.
 - Dashboard now has an onboarding checklist component that explains the scraping flow and shows progress from real Prisma counts.
 - Onboarding checklist now fails soft in dev when `DATABASE_URL` is missing, so the dashboard no longer crashes before env setup.
+- Proxy Region is now implemented end-to-end: proxies can be tagged by region, worker selects proxy by requested region, and jobs store/display the actual proxy used.
 
 ## Next Step
 
-- Persist and display reactions/comments reliably after crawl completes (worker extraction -> DB writeback for `Interaction`).
+- Apply new Prisma migration to development database and verify region-based proxy selection behavior with real crawl runs.
 
 ## Notes for Resume
 

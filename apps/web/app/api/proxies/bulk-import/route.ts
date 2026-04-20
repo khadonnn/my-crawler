@@ -4,13 +4,42 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+type ProxyRegion = "ANY" | "VN" | "US";
+
 type ParsedProxy = {
   address: string;
   port: number;
   username: string | null;
   password: string | null;
+  region: ProxyRegion;
   status: "UNKNOWN";
 };
+
+function normalizeProxyRegion(value: unknown): ProxyRegion {
+  if (typeof value !== "string") {
+    return "ANY";
+  }
+
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "VN" || normalized === "US" || normalized === "ANY") {
+    return normalized;
+  }
+
+  return "ANY";
+}
+
+async function hasProxyRegionColumn(prisma: ReturnType<typeof getPrisma>) {
+  const rows = await prisma.$queryRawUnsafe<Array<{ exists: boolean }>>(
+    `SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = 'Proxy'
+        AND column_name = 'region'
+    ) AS "exists"`,
+  );
+
+  return Boolean(rows[0]?.exists);
+}
 
 function deduplicateRows(rows: ParsedProxy[]): ParsedProxy[] {
   const unique = new Map<string, ParsedProxy>();
@@ -35,24 +64,46 @@ function normalizeProxyList(proxyList: unknown): string[] {
 }
 
 function parseProxyLine(line: string): ParsedProxy | null {
-  const parts = line.split(":").map((part) => part.trim());
+  const parts = line
+    .split(":")
+    .map((part) => part.trim())
+    .filter(Boolean);
 
   if (parts.length < 2) {
     return null;
   }
 
-  const [address, portRaw, usernameRaw, passwordRaw] = parts;
+  const [address, portRaw, ...rest] = parts;
   const port = Number.parseInt(portRaw, 10);
 
   if (!address || Number.isNaN(port)) {
     return null;
   }
 
+  let region: ProxyRegion = "ANY";
+  let credentialParts = rest;
+
+  if (rest.length > 0) {
+    const last = normalizeProxyRegion(rest[rest.length - 1]);
+    if (last !== "ANY" || rest[rest.length - 1].toUpperCase() === "ANY") {
+      region = last;
+      credentialParts = rest.slice(0, -1);
+    }
+  }
+
+  // Support formats:
+  // - ip:port
+  // - ip:port:username:password
+  // - ip:port:region
+  // - ip:port:username:password:region
+  const [usernameRaw, passwordRaw] = credentialParts;
+
   return {
     address,
     port,
     username: usernameRaw || null,
     password: passwordRaw || null,
+    region,
     status: "UNKNOWN",
   };
 }
@@ -61,6 +112,7 @@ export async function POST(req: Request) {
   try {
     const { proxyList } = await req.json();
     const prisma = getPrisma();
+    const regionColumnExists = await hasProxyRegionColumn(prisma);
 
     const normalizedLines = normalizeProxyList(proxyList);
     if (normalizedLines.length === 0) {
@@ -87,7 +139,17 @@ export async function POST(req: Request) {
     if (uniqueRows.length > 0) {
       try {
         const result = await prisma.proxy.createMany({
-          data: uniqueRows,
+          data: uniqueRows.map((row) =>
+            regionColumnExists
+              ? row
+              : {
+                  address: row.address,
+                  port: row.port,
+                  username: row.username,
+                  password: row.password,
+                  status: row.status,
+                },
+          ),
           skipDuplicates: true,
         });
         imported = result.count;
@@ -95,7 +157,17 @@ export async function POST(req: Request) {
         // Fallback for environments where bulk insert may fail unexpectedly.
         for (const row of uniqueRows) {
           try {
-            await prisma.proxy.create({ data: row });
+            await prisma.proxy.create({
+              data: regionColumnExists
+                ? row
+                : {
+                    address: row.address,
+                    port: row.port,
+                    username: row.username,
+                    password: row.password,
+                    status: row.status,
+                  },
+            });
             imported += 1;
           } catch {
             // Ignore row-level insert errors (often duplicates).

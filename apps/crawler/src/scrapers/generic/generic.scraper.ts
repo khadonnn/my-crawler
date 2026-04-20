@@ -1,4 +1,4 @@
-import { PlaywrightCrawler } from "crawlee";
+import { PlaywrightCrawler, ProxyConfiguration } from "crawlee";
 import { BaseScraper } from "../base/base.scraper.js";
 import type {
   ScrapeExecutionInput,
@@ -15,6 +15,9 @@ export class GenericScraper extends BaseScraper {
 
   async execute(input: ScrapeExecutionInput): Promise<ScrapeExecutionOutput> {
     const scraper = this;
+    const proxyConfiguration = input.proxy
+      ? new ProxyConfiguration({ proxyUrls: [input.proxy.url] })
+      : undefined;
 
     return new Promise<ScrapeExecutionOutput>((resolve, reject) => {
       const crawler = new PlaywrightCrawler({
@@ -24,6 +27,7 @@ export class GenericScraper extends BaseScraper {
         maxRequestsPerCrawl: 1,
         requestHandlerTimeoutSecs: 30,
         headless: true,
+        proxyConfiguration,
         async requestHandler({ page, request, log }) {
           logJobEvent("info", {
             jobId: input.jobId,
@@ -31,7 +35,16 @@ export class GenericScraper extends BaseScraper {
             phase: "navigate",
             step: "open-url",
             message: "Opening target URL",
-            meta: { url: request.loadedUrl ?? input.url },
+            meta: {
+              url: request.loadedUrl ?? input.url,
+              proxy: input.proxy
+                ? {
+                    address: input.proxy.address,
+                    port: input.proxy.port,
+                    region: input.proxy.region,
+                  }
+                : null,
+            },
           });
           log.info(`[${input.jobId}][generic] Crawling: ${request.loadedUrl}`);
 

@@ -31,6 +31,10 @@ type JobRow = {
   sourceType: string;
   sourceValue: string;
   keyword: string | null;
+  requestedProxyRegion: "ANY" | "VN" | "US";
+  usedProxyAddress: string | null;
+  usedProxyPort: number | null;
+  usedProxyRegion: "ANY" | "VN" | "US" | null;
   status: string;
   progress: number;
   leadCount: number;
@@ -223,6 +227,7 @@ export function CrawlersConsole() {
                         Job ID
                       </th>
                       <th className="px-4 py-3 text-left font-medium">URL</th>
+                      <th className="px-4 py-3 text-left font-medium">Proxy</th>
                       <th className="px-4 py-3 text-left font-medium">
                         Ngay chay
                       </th>
@@ -256,6 +261,19 @@ export function CrawlersConsole() {
                                   Keyword: {job.keyword}
                                 </p>
                               ) : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            <div className="space-y-1">
+                              <p className="font-medium">
+                                Requested: {job.requestedProxyRegion}
+                              </p>
+                              <p className="text-muted-foreground">
+                                Used:{" "}
+                                {job.usedProxyAddress && job.usedProxyPort
+                                  ? `${job.usedProxyAddress}:${job.usedProxyPort} (${job.usedProxyRegion ?? "ANY"})`
+                                  : "Auto / none selected"}
+                              </p>
                             </div>
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground">

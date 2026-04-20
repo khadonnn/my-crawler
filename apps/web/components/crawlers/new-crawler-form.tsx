@@ -165,6 +165,10 @@ export function NewCrawlerForm({
             <option value="VN">Vietnam</option>
             <option value="US">United States</option>
           </select>
+          <p className="text-xs text-muted-foreground">
+            Worker se uu tien chon proxy WORKING theo region nay va luu proxy da
+            dung vao job history.
+          </p>
         </div>
       </div>
 

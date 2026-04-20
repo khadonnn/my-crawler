@@ -3,7 +3,11 @@ import path from "node:path";
 
 import { getPrisma } from "@scraping-platform/db";
 import { Dataset } from "crawlee";
-import type { ScrapedEntities } from "../scrapers/base/scraper.types.js";
+import type {
+  ProxyRegion,
+  ScrapedEntities,
+  SelectedProxyConfig,
+} from "../scrapers/base/scraper.types.js";
 import { createScraperForUrl } from "../scrapers/factory/scraper.factory.js";
 import { cleanupOldArtifacts, logJobEvent } from "../observability/index.js";
 
@@ -18,7 +22,115 @@ export interface ScrapeJob {
 type AddScrapeJobOptions = {
   debugMode?: boolean;
   clientJobId?: string;
+  proxyRegion?: ProxyRegion;
 };
+
+type ProxyRow = {
+  id: string;
+  address: string;
+  port: number;
+  username: string | null;
+  password: string | null;
+  protocol: string;
+  region: ProxyRegion;
+  status: string;
+  latency: number;
+};
+
+function normalizeProxyRegion(value: unknown): ProxyRegion {
+  if (value === "VN" || value === "US" || value === "ANY") {
+    return value;
+  }
+
+  return "ANY";
+}
+
+function buildProxyUrl(proxy: ProxyRow): string {
+  const protocol = proxy.protocol || "http";
+  const auth =
+    proxy.username && proxy.password
+      ? `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@`
+      : "";
+  return `${protocol}://${auth}${proxy.address}:${proxy.port}`;
+}
+
+async function selectProxyForRegion(params: {
+  prisma: ReturnType<typeof getPrisma>;
+  proxyRegion: ProxyRegion;
+}): Promise<SelectedProxyConfig | null> {
+  const { prisma, proxyRegion } = params;
+
+  const whereClause =
+    proxyRegion === "ANY"
+      ? { status: { in: ["WORKING", "UNKNOWN"] as const } }
+      : {
+          status: { in: ["WORKING", "UNKNOWN"] as const },
+          region: proxyRegion,
+        };
+
+  const primaryCandidates = await prisma.proxy.findMany({
+    where: whereClause,
+    orderBy: { latency: "asc" },
+    take: 30,
+    select: {
+      id: true,
+      address: true,
+      port: true,
+      username: true,
+      password: true,
+      protocol: true,
+      region: true,
+      status: true,
+      latency: true,
+    },
+  });
+
+  const selectedPrimary =
+    primaryCandidates.length > 0
+      ? (primaryCandidates.find((proxy) => proxy.status === "WORKING") ??
+        primaryCandidates[0])
+      : null;
+
+  let selected = selectedPrimary;
+  if (!selected && proxyRegion !== "ANY") {
+    const fallbackCandidates = await prisma.proxy.findMany({
+      where: {
+        status: { in: ["WORKING", "UNKNOWN"] as const },
+      },
+      orderBy: { latency: "asc" },
+      take: 30,
+      select: {
+        id: true,
+        address: true,
+        port: true,
+        username: true,
+        password: true,
+        protocol: true,
+        region: true,
+        status: true,
+        latency: true,
+      },
+    });
+
+    selected =
+      fallbackCandidates.find((proxy) => proxy.status === "WORKING") ??
+      fallbackCandidates[0] ??
+      null;
+  }
+
+  if (!selected) {
+    return null;
+  }
+
+  return {
+    id: selected.id,
+    address: selected.address,
+    port: selected.port,
+    region: normalizeProxyRegion(selected.region),
+    protocol: selected.protocol,
+    url: buildProxyUrl(selected),
+  };
+}
 
 function detectBlockedReason(errorMessage: string): string | null {
   const normalized = errorMessage.toLowerCase();
@@ -265,6 +377,14 @@ class ScraperService {
     try {
       const debugMode =
         options?.debugMode ?? process.env.CRAWLER_DEBUG_MODE === "true";
+      const requestedProxyRegion = normalizeProxyRegion(options?.proxyRegion);
+
+      const selectedProxy = prisma
+        ? await selectProxyForRegion({
+            prisma,
+            proxyRegion: requestedProxyRegion,
+          })
+        : null;
 
       if (prisma && options?.clientJobId) {
         await prisma.job.update({
@@ -275,6 +395,11 @@ class ScraperService {
             errorMessage: null,
             blockedReason: null,
             workerJobId: jobId,
+            requestedProxyRegion,
+            usedProxyId: selectedProxy?.id ?? null,
+            usedProxyAddress: selectedProxy?.address ?? null,
+            usedProxyPort: selectedProxy?.port ?? null,
+            usedProxyRegion: selectedProxy?.region ?? null,
             debugMode,
           },
         });
@@ -292,7 +417,19 @@ class ScraperService {
         phase: "job",
         step: "start",
         message: "Job started",
-        meta: { url, debugMode },
+        meta: {
+          url,
+          debugMode,
+          requestedProxyRegion,
+          usedProxy: selectedProxy
+            ? {
+                id: selectedProxy.id,
+                address: selectedProxy.address,
+                port: selectedProxy.port,
+                region: selectedProxy.region,
+              }
+            : null,
+        },
       });
 
       // Create isolated Dataset for this job
@@ -303,6 +440,7 @@ class ScraperService {
         jobId,
         url,
         debugMode,
+        proxy: selectedProxy ?? undefined,
       });
 
       // Push data to the job's isolated Dataset

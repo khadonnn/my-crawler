@@ -38,16 +38,26 @@ export default async function GettingStartedChecklist() {
   let jobCount = 0;
   let completedJobCount = 0;
   let interactionCount = 0;
+  let usedFallbackCounts = false;
 
   if (hasDatabaseUrl) {
     const prisma = getPrisma();
 
+    const safeCount = async (query: Promise<number>): Promise<number> => {
+      try {
+        return await query;
+      } catch {
+        usedFallbackCounts = true;
+        return 0;
+      }
+    };
+
     [activeAccountCount, jobCount, completedJobCount, interactionCount] =
       await Promise.all([
-        prisma.account.count({ where: { status: "ACTIVE" } }),
-        prisma.job.count(),
-        prisma.job.count({ where: { status: "COMPLETED" } }),
-        prisma.interaction.count(),
+        safeCount(prisma.account.count({ where: { status: "ACTIVE" } })),
+        safeCount(prisma.job.count()),
+        safeCount(prisma.job.count({ where: { status: "COMPLETED" } })),
+        safeCount(prisma.interaction.count()),
       ]);
   }
 
@@ -106,6 +116,11 @@ export default async function GettingStartedChecklist() {
               <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
                 DATABASE_URL chưa được cấu hình trong môi trường dev, nên
                 checklist đang hiển thị trạng thái chờ cho đến khi kết nối DB.
+              </p>
+            ) : usedFallbackCounts ? (
+              <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+                Một số bảng chưa có trong DB dev hiện tại, nên checklist đang
+                dùng số liệu tạm thời để tránh làm sập trang chủ.
               </p>
             ) : null}
           </div>

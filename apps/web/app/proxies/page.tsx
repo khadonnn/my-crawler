@@ -18,16 +18,16 @@ export default function ProxiesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Proxies / IPs</h1>
         <p className="text-muted-foreground">
-          Quan ly proxy pool va kiem tra tinh trang kha dung cua tung proxy.
+          Quản lý proxy pool và kiểm tra tình trạng khả dụng của từng proxy.
         </p>
       </div>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <div>
-            <CardTitle>Danh Sach Proxy</CardTitle>
+            <CardTitle>Danh Sách Proxy</CardTitle>
             <CardDescription>
-              Xem va quan ly toan bo proxy trong he thong.
+              Xem và quản lý toàn bộ proxy trong hệ thống.
             </CardDescription>
           </div>
           <ImportProxyDialog onSuccess={() => setRefreshKey((k) => k + 1)} />
@@ -39,23 +39,27 @@ export default function ProxiesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Huong Dan Su Dung</CardTitle>
+          <CardTitle>Hướng Dẫn Sử Dụng</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>
-            • <strong>Import Proxies:</strong> Nhan nut Import va dan danh sach
-            proxy vao (co the copy tu file).
+            • <strong>Import Proxies:</strong> Nhấn nút Import và dán danh sách
+            proxy vào (có thể copy từ file).
           </p>
           <p>
-            • <strong>Check Status:</strong> Nhan nut Refresh de kiem tra trang
-            thai proxy (Working / Dead / Unknown).
+            • <strong>Check Status:</strong> Nhấn nút Refresh để kiểm tra trạng
+            thái proxy (Working / Dead / Unknown).
           </p>
           <p>
-            • <strong>Delete:</strong> Nhan nut Trash de xoa proxy khoi he
-            thong.
+            • <strong>Region:</strong> Co the dat region khi import proxy
+            (VN/US/ANY). Job sẽ ưu tiên proxy đúng region đã chọn.
           </p>
           <p>
-            • Proxy se tu dong duoc dung trong qua trinh crao neu status la
+            • <strong>Delete:</strong> Nhấn nút Trash để xóa proxy khỏi hệ
+            thống.
+          </p>
+          <p>
+            • Proxy sẽ tự động được dùng trong quá trình crawl nếu status là
             WORKING.
           </p>
         </CardContent>

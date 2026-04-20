@@ -1,4 +1,4 @@
-import { PlaywrightCrawler } from "crawlee";
+import { PlaywrightCrawler, ProxyConfiguration } from "crawlee";
 import { getPrisma } from "@scraping-platform/db";
 import type { Page } from "playwright";
 import { BaseScraper } from "../base/base.scraper.js";
@@ -502,6 +502,9 @@ export class FacebookScraper extends BaseScraper {
 
   async execute(input: ScrapeExecutionInput): Promise<ScrapeExecutionOutput> {
     const scraper = this;
+    const proxyConfiguration = input.proxy
+      ? new ProxyConfiguration({ proxyUrls: [input.proxy.url] })
+      : undefined;
     let prisma: ReturnType<typeof getPrisma> | null = null;
     let account: AccountSession | null = null;
     let storageState: BrowserStorageState | undefined;
@@ -564,6 +567,7 @@ export class FacebookScraper extends BaseScraper {
         maxRequestsPerCrawl: 1,
         requestHandlerTimeoutSecs: 45,
         headless: true,
+        proxyConfiguration,
         preNavigationHooks: storageState
           ? [
               async ({ page, request }) => {
@@ -582,7 +586,16 @@ export class FacebookScraper extends BaseScraper {
             phase: "navigate",
             step: "open-url",
             message: "Opening target URL",
-            meta: { url: request.loadedUrl ?? input.url },
+            meta: {
+              url: request.loadedUrl ?? input.url,
+              proxy: input.proxy
+                ? {
+                    address: input.proxy.address,
+                    port: input.proxy.port,
+                    region: input.proxy.region,
+                  }
+                : null,
+            },
           });
           log.info(`[${input.jobId}][facebook] Crawling: ${request.loadedUrl}`);
 

@@ -17,6 +17,11 @@ export type JobListItem = {
   sourceType: string;
   sourceValue: string;
   keyword: string | null;
+  requestedProxyRegion: "ANY" | "VN" | "US";
+  usedProxyId: string | null;
+  usedProxyAddress: string | null;
+  usedProxyPort: number | null;
+  usedProxyRegion: "ANY" | "VN" | "US" | null;
   debugMode: boolean;
   status: string;
   progress: number;
@@ -81,6 +86,7 @@ export async function createCrawlerJob(input: CreateCrawlerJobInput) {
       sourceType: keyword ? "KEYWORD" : "GROUP_URL",
       sourceValue: url,
       keyword: keyword ?? null,
+      requestedProxyRegion: proxyRegion,
       status: "PENDING",
       progress: 0,
       debugMode,
@@ -151,6 +157,11 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
         sourceType: true,
         sourceValue: true,
         keyword: true,
+        requestedProxyRegion: true,
+        usedProxyId: true,
+        usedProxyAddress: true,
+        usedProxyPort: true,
+        usedProxyRegion: true,
         debugMode: true,
         status: true,
         progress: true,
@@ -193,6 +204,11 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
       sourceType: job.sourceType,
       sourceValue: job.sourceValue,
       keyword: job.keyword,
+      requestedProxyRegion: job.requestedProxyRegion,
+      usedProxyId: job.usedProxyId,
+      usedProxyAddress: job.usedProxyAddress,
+      usedProxyPort: job.usedProxyPort,
+      usedProxyRegion: job.usedProxyRegion,
       debugMode: job.debugMode,
       status: job.status,
       progress: job.progress,
@@ -234,6 +250,7 @@ export async function rerunCrawlerJob(
     select: {
       sourceValue: true,
       keyword: true,
+      requestedProxyRegion: true,
       debugMode: true,
     },
   });
@@ -245,6 +262,7 @@ export async function rerunCrawlerJob(
   return createCrawlerJob({
     url: existing.sourceValue,
     keyword: existing.keyword ?? undefined,
+    proxyRegion: existing.requestedProxyRegion,
     debugMode: options?.debugMode ?? existing.debugMode,
   });
 }

@@ -27,7 +27,7 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
 
   async function handleImport() {
     if (!text.trim()) {
-      toast.error("Vui long nhap danh sach proxy");
+      toast.error("Vui lòng nhập danh sách proxy");
       return;
     }
 
@@ -46,24 +46,24 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
 
       const data = (await res.json()) as BulkImportResponse;
       if (!res.ok) {
-        throw new Error(data?.error || "Import that bai");
+        throw new Error(data?.error || "Import thất bại");
       }
 
       if (data.imported > 0) {
-        toast.success(`Nhap thanh cong ${data.imported} proxy`);
+        toast.success(`Nhập thành công ${data.imported} proxy`);
       } else {
-        toast("Khong co proxy moi de import");
+        toast("Không có proxy mới để import");
       }
 
       if (data.failed > 0) {
-        toast(`${data.failed} dong khong hop le hoac bi trung`);
+        toast(`${data.failed} dòng không hợp lệ hoặc bị trùng`);
       }
 
       setText("");
       setOpen(false);
       onSuccess?.();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Import that bai");
+      toast.error(error instanceof Error ? error.message : "Import thất bại");
     } finally {
       setLoading(false);
     }
@@ -74,15 +74,15 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
       <DialogTrigger asChild>
         <Button variant="default" size="sm">
           <Plus className="mr-2 size-4" />
-          Import Proxies
+          Import Proxy
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Nhap Danh Sach Proxy</DialogTitle>
+          <DialogTitle>Nhập Danh Sách Proxy</DialogTitle>
           <DialogDescription>
-            Dinh dang: ip:port:user:pass (moi dong mot proxy, user/pass la tuy
-            chon)
+            Định dạng: ip:port, ip:port:user:pass, hoặc thêm region ở cuối dòng
+            (VN/US/ANY). Ví dụ: ip:port:user:pass:VN
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -99,7 +99,7 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
               disabled={loading || !text.trim()}
               className="flex-1"
             >
-              {loading ? "Dang nhap..." : "Import"}
+              {loading ? "Đang nhập..." : "Import"}
             </Button>
             <Button
               onClick={() => {
@@ -107,7 +107,7 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
               }}
               variant="outline"
             >
-              Close
+              Đóng
             </Button>
           </div>
         </div>

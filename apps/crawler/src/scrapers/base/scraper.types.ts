@@ -1,7 +1,19 @@
+export type ProxyRegion = "ANY" | "VN" | "US";
+
+export interface SelectedProxyConfig {
+  id: string;
+  address: string;
+  port: number;
+  region: ProxyRegion;
+  protocol: string;
+  url: string;
+}
+
 export interface ScrapeExecutionInput {
   jobId: string;
   url: string;
   debugMode?: boolean;
+  proxy?: SelectedProxyConfig;
 }
 
 export interface ScrapedPostEntity {

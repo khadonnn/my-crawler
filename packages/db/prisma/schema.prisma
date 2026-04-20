@@ -39,12 +39,23 @@ enum JobArtifactType {
   RAW_EXTRACT
 }
 
+enum ProxyRegion {
+  ANY
+  VN
+  US
+}
+
 model Job {
   id              String    @id @default(uuid())
   workerJobId     String?   @unique
   sourceType      JobSourceType
   sourceValue     String
   keyword         String?
+  requestedProxyRegion ProxyRegion @default(ANY)
+  usedProxyId     String?
+  usedProxyAddress String?
+  usedProxyPort   Int?
+  usedProxyRegion ProxyRegion?
   debugMode       Boolean   @default(false)
   status          JobStatus @default(PENDING)
   progress        Int       @default(0)
@@ -147,6 +158,7 @@ model Proxy {
   id          String   @id @default(uuid())
   address     String
   port        Int
+  region      ProxyRegion @default(ANY)
   username    String?
   password    String?
   protocol    String   @default("http")

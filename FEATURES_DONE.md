@@ -143,6 +143,29 @@
   - Frontend calls `GET /posts/:id/reactions`.
   - If empty, frontend auto-calls `POST /api/crawl/reactions`, shows loading, waits for job completion, then fetches reactions again.
 
+## Proxy Region End-to-End (Selection + Visibility)
+
+- Added `ProxyRegion` enum to Prisma schema and introduced region tagging for `Proxy` records.
+- Added job-level proxy metadata fields to persist region request and actual proxy used:
+  - `requestedProxyRegion`
+  - `usedProxyId`
+  - `usedProxyAddress`
+  - `usedProxyPort`
+  - `usedProxyRegion`
+- Added migration: `packages/db/prisma/migrations/20260420113000_add_proxy_region_and_job_proxy_meta/migration.sql`.
+- Updated proxies APIs to accept/normalize region on create and bulk import.
+- Extended bulk import parser to support lines like:
+  - `ip:port`
+  - `ip:port:user:pass`
+  - `ip:port:region`
+  - `ip:port:user:pass:region`
+- Updated `/proxies` UI table to display a dedicated Region column.
+- Updated crawler form helper text to clarify region behavior.
+- Implemented worker-side proxy selection by requested region, prioritizing `WORKING` proxies and falling back safely.
+- Wired selected proxy into Crawlee Playwright configuration (`proxyUrls`) for both generic and Facebook scrapers.
+- Updated jobs list output and crawler console UI to show requested region and actual proxy used per job.
+- Regenerated Prisma Client successfully after schema update.
+
 ## Dashboard Onboarding Checklist
 
 - Added a server-rendered onboarding checklist on the dashboard to guide new users through the scraping flow.

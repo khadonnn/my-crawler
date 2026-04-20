@@ -126,6 +126,49 @@ packages/shared/src/
 - packages/shared: Shared types/utilities, and future cross-app contracts.
 - .docs: Tài liệu design và kế hoạch triển khai.
 
+## Setup & Run
+
+### 1. Cài dependencies ở root
+
+Chạy ở thư mục root:
+
+```bash
+npm install
+```
+
+Vì repo dùng npm workspaces nên lệnh này sẽ cài toàn bộ workspace package bên trong `apps/*` và `packages/*`, gồm cả `apps/web`, `apps/crawler`, `packages/db`, và `packages/shared`.
+
+### 2. Chạy Docker ở root
+
+File `docker-compose.yml` ở root hiện chỉ có PostgreSQL. Chạy:
+
+```bash
+docker compose up -d
+```
+
+Nếu cần xem log:
+
+```bash
+docker compose logs -f postgres
+```
+
+### 3. Chạy app ở root
+
+Sau khi `npm install`, chạy:
+
+```bash
+npm run dev
+```
+
+Lệnh này gọi `turbo run dev` và sẽ chạy các workspace có script `dev`. Hiện tại cả `apps/web` và `apps/crawler` đều có `dev`, nên root dev sẽ start cả hai.
+
+### 4. Chạy riêng từng app khi cần
+
+```bash
+npm --workspace @scraping-platform/web run dev
+npm --workspace @scraping-platform/crawler run dev
+```
+
 ## Architecture Direction
 
 - Current state is a single crawler execution flow in scraper.service.ts.
