@@ -101,6 +101,7 @@
 
 - Added Prisma `Account` model for platform account/session storage (`sessionData` JSON + status lifecycle fields).
 - Ran Prisma sync and client generation after schema update.
+- Made Prisma env loading workspace-aware so `DATABASE_URL` resolves from root `.env`, `packages/db/.env`, or app-local `.env` when Next.js runs from a subdirectory.
 - Added Playwright session generator script at `apps/crawler/src/pocs/gen-session.ts` with interactive Enter-to-save flow.
 - Session generator now stores cookie/session state at `apps/crawler/storage/cookies/facebook-session.json` and auto-creates folder recursively.
 - Added crawler npm script: `gen-session`.
@@ -141,3 +142,10 @@
   - User clicks `View Reactions` on a post.
   - Frontend calls `GET /posts/:id/reactions`.
   - If empty, frontend auto-calls `POST /api/crawl/reactions`, shows loading, waits for job completion, then fetches reactions again.
+
+## Dashboard Onboarding Checklist
+
+- Added a server-rendered onboarding checklist on the dashboard to guide new users through the scraping flow.
+- Checklist uses real Prisma counts for active accounts, total jobs, completed jobs, and interactions.
+- Added per-step badges, action links, and an overall progress bar.
+- Increased the dashboard growth chart minimum height so the layout stays readable with sparse data.

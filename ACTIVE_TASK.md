@@ -19,12 +19,15 @@
 - OCR observability is now integrated in Facebook PoC: screenshot -> OCR text extraction -> persisted OCR artifact file for audit.
 - Storage bootstrap is now present in repo with `.gitkeep` placeholders and ignore rules for runtime artifacts.
 - Cookie Injection foundation is now in place: `Account` model, interactive session generator, and `POST /api/accounts` ingestion API.
+- Prisma env loading is now workspace-aware, so `DATABASE_URL` can be resolved from the repo root when `apps/web` starts in a subdirectory.
 - Cookie import UI is now available with modal-based account session submission and client-side JSON validation.
 - Account management dashboard is now live at `/accounts` with list/update/delete actions.
 - Facebook scraper is now session-aware: loads ACTIVE account session before crawl, falls back to anonymous if unavailable, and updates `lastUsedAt`.
 - Session validation is now in place: detected Facebook login walls auto-mark account status as `EXPIRED`.
 - Dashboard crawl trigger for reactions is now available via `POST /api/crawl/reactions`.
 - Datasets UI now supports end-to-end `View Reactions` flow with auto-trigger crawl and refetch-after-completion.
+- Dashboard now has an onboarding checklist component that explains the scraping flow and shows progress from real Prisma counts.
+- Onboarding checklist now fails soft in dev when `DATABASE_URL` is missing, so the dashboard no longer crashes before env setup.
 
 ## Next Step
 

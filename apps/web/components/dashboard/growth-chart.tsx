@@ -33,7 +33,7 @@ export function GrowthChart({ data }: { data: GrowthPoint[] }) {
         <CardTitle>Tang Truong Du Lieu</CardTitle>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={config}>
+        <ChartContainer config={config} className="min-h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={data}

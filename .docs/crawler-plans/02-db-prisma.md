@@ -8,10 +8,14 @@
 ## Checklist
 
 - [ ] Thiết kế schema Prisma cho jobs và results
-- [ ] Kết nối database development
+- [x] Kết nối database development
 - [ ] Tạo migration đầu tiên
 - [ ] Tách layer persistence ra khỏi service crawl
 - [ ] Thêm lưu lịch sử job thành công / thất bại
+
+## Ghi chú cập nhật
+
+- Prisma client hiện nạp `DATABASE_URL` từ workspace root, `packages/db/.env`, hoặc app-local `.env` để Next.js và crawler dùng chung cấu hình dev.
 
 ## Ghi chú
 

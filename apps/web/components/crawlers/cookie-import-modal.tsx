@@ -30,14 +30,7 @@ export function CookieImportModal({ onSuccess }: CookieImportModalProps) {
     event.preventDefault();
 
     if (!name.trim()) {
-      setError("Name is required.");
-      return;
-    }
-
-    try {
-      JSON.parse(sessionJson);
-    } catch {
-      setError("Session JSON is invalid.");
+      setError("Tên là bắt buộc.");
       return;
     }
 
@@ -62,7 +55,7 @@ export function CookieImportModal({ onSuccess }: CookieImportModalProps) {
       };
 
       if (!response.ok) {
-        setError(result.error ?? "Unable to import account session.");
+        setError(result.error ?? "Không thể import session tài khoản.");
         return;
       }
 
@@ -71,7 +64,7 @@ export function CookieImportModal({ onSuccess }: CookieImportModalProps) {
       setOpen(false);
       onSuccess?.();
     } catch {
-      setError("Network error while importing cookie session.");
+      setError("Lỗi mạng khi import cookie session.");
     } finally {
       setLoading(false);
     }
@@ -84,39 +77,45 @@ export function CookieImportModal({ onSuccess }: CookieImportModalProps) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Import Cookie Session</DialogTitle>
+          <DialogTitle>Import cookie session</DialogTitle>
           <DialogDescription>
-            Paste Playwright storageState JSON for a Facebook account.
+            Dán JSON Array, Netscape text hoặc Header String từ extension
+            <span className="font-medium"> Get cookies.txt LOCALLY</span>). Hệ
+            thống sẽ tự nhận diện và chuyển đổi để lưu tài khoản.
           </DialogDescription>
         </DialogHeader>
 
         <form className="space-y-3" onSubmit={handleSubmit}>
           <div className="space-y-1">
-            <label className="text-sm font-medium">Name</label>
+            <label className="text-sm font-medium">Tên</label>
             <Input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Account name"
+              placeholder="Tên tài khoản"
               disabled={loading}
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-sm font-medium">Session JSON</label>
+            <label className="text-sm font-medium">Nội dung cookie</label>
             <Textarea
               value={sessionJson}
               onChange={(event) => setSessionJson(event.target.value)}
-              placeholder='{"cookies":[],"origins":[]}'
+              placeholder='[{"domain":".facebook.com","name":"c_user","value":"..."}]'
               className="min-h-44"
               disabled={loading}
             />
+            <p className="text-xs text-muted-foreground">
+              Hỗ trợ 3 định dạng: JSON Array, Netscape HTTP Cookie File hoặc
+              Header String.
+            </p>
           </div>
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
           <DialogFooter>
             <Button type="submit" disabled={loading}>
-              {loading ? "Importing..." : "Submit"}
+              {loading ? "Đang import..." : "Lưu session"}
             </Button>
           </DialogFooter>
         </form>
