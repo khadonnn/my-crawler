@@ -107,6 +107,7 @@ apps/crawler/
 	│     └─ scraper.factory.ts
 	├─ observability/
 	│  ├─ logger.ts
+	│  ├─ ocr.ts
 	│  ├─ screenshot.ts
 	│  └─ retention.ts
 	└─ utils/

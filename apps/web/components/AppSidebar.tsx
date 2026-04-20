@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
   Activity,
+  CircleUserRound,
   Bot,
   ChevronDown,
   ChevronsUpDown,
@@ -176,6 +177,12 @@ const AppSidebar = () => {
                   <SidebarMenuButton onClick={() => router.push("/api-keys")}>
                     <FileCode2 />
                     API Keys
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={() => router.push("/accounts")}>
+                    <CircleUserRound />
+                    Accounts
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

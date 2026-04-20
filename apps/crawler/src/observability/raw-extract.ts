@@ -1,4 +1,5 @@
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { getJobRawExtractDirectory } from "./artifact-paths.js";
 
@@ -12,11 +13,32 @@ export async function saveRawExtract(params: {
   payload: unknown;
 }): Promise<string> {
   const directory = getJobRawExtractDirectory(params.jobId);
-  await fs.mkdir(directory, { recursive: true });
+  fs.mkdirSync(directory, { recursive: true });
 
   const fileName = `${Date.now()}-${toSafeFileName(params.label)}.json`;
   const filePath = path.join(directory, fileName);
 
-  await fs.writeFile(filePath, JSON.stringify(params.payload, null, 2), "utf8");
+  await fsp.writeFile(
+    filePath,
+    JSON.stringify(params.payload, null, 2),
+    "utf8",
+  );
+  return filePath;
+}
+
+export async function saveRawExtractWithFileName(params: {
+  jobId: string;
+  fileName: string;
+  payload: unknown;
+}): Promise<string> {
+  const directory = getJobRawExtractDirectory(params.jobId);
+  fs.mkdirSync(directory, { recursive: true });
+
+  const filePath = path.join(directory, params.fileName);
+  await fsp.writeFile(
+    filePath,
+    JSON.stringify(params.payload, null, 2),
+    "utf8",
+  );
   return filePath;
 }

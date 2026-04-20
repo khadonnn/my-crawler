@@ -16,10 +16,19 @@
 - Multi-platform architecture direction has been documented in `.docs/crawler-plans/07-multi-platform-strategy-refactor.md`.
 - Observability phase is now wired into the crawler worker with structured job logs, debug screenshots, raw extract artifacts, and retention cleanup.
 - Per-job `debugMode` is now plumbed from Web UI/API to Worker execution (including optional rerun override).
+- OCR observability is now integrated in Facebook PoC: screenshot -> OCR text extraction -> persisted OCR artifact file for audit.
+- Storage bootstrap is now present in repo with `.gitkeep` placeholders and ignore rules for runtime artifacts.
+- Cookie Injection foundation is now in place: `Account` model, interactive session generator, and `POST /api/accounts` ingestion API.
+- Cookie import UI is now available with modal-based account session submission and client-side JSON validation.
+- Account management dashboard is now live at `/accounts` with list/update/delete actions.
+- Facebook scraper is now session-aware: loads ACTIVE account session before crawl, falls back to anonymous if unavailable, and updates `lastUsedAt`.
+- Session validation is now in place: detected Facebook login walls auto-mark account status as `EXPIRED`.
+- Dashboard crawl trigger for reactions is now available via `POST /api/crawl/reactions`.
+- Datasets UI now supports end-to-end `View Reactions` flow with auto-trigger crawl and refetch-after-completion.
 
 ## Next Step
 
-- Add Prisma fields/tables for debug artifacts (screenshot/rawExtract paths, debug flags, blocked reason) and start syncing worker status back to DB lifecycle.
+- Persist and display reactions/comments reliably after crawl completes (worker extraction -> DB writeback for `Interaction`).
 
 ## Notes for Resume
 

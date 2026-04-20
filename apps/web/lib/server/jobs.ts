@@ -248,3 +248,34 @@ export async function rerunCrawlerJob(
     debugMode: options?.debugMode ?? existing.debugMode,
   });
 }
+
+export async function createReactionsCrawlJob(postId: string) {
+  const prisma = getPrisma();
+
+  const post = await prisma.post.findFirst({
+    where: {
+      OR: [{ id: postId }, { fbPostId: postId }],
+    },
+    select: {
+      id: true,
+      postUrl: true,
+      keywordMatched: true,
+    },
+  });
+
+  if (!post) {
+    throw new Error("Post khong ton tai");
+  }
+
+  const created = await createCrawlerJob({
+    url: post.postUrl,
+    keyword: post.keywordMatched ?? undefined,
+    scrapeMode: "POST_ONLY",
+  });
+
+  return {
+    jobId: created.job.id,
+    workerId: created.workerId,
+    postId: post.id,
+  };
+}

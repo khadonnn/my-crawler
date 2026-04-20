@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { getPrisma } from "@scraping-platform/db";
 import { Dataset } from "crawlee";
+import type { ScrapedEntities } from "../scrapers/base/scraper.types.js";
 import { createScraperForUrl } from "../scrapers/factory/scraper.factory.js";
 import { cleanupOldArtifacts, logJobEvent } from "../observability/index.js";
 
@@ -53,6 +54,147 @@ async function collectArtifactPaths(workerJobId: string): Promise<{
       path.join("storage", workerJobId, "raw-extracts", fileName),
     ),
   };
+}
+
+async function persistScrapedEntities(params: {
+  prisma: ReturnType<typeof getPrisma>;
+  clientJobId: string;
+  entities?: ScrapedEntities;
+}): Promise<void> {
+  const { prisma, clientJobId, entities } = params;
+  if (!entities) {
+    return;
+  }
+
+  const posts = entities.posts ?? [];
+  const profiles = entities.profiles ?? [];
+  const interactions = entities.interactions ?? [];
+
+  if (posts.length === 0) {
+    return;
+  }
+
+  for (const post of posts) {
+    await prisma.post.upsert({
+      where: { fbPostId: post.fbPostId },
+      update: {
+        postUrl: post.postUrl,
+        authorName: post.authorName,
+        content: post.content ?? null,
+        keywordMatched: post.keywordMatched ?? null,
+        scrapedAt: new Date(),
+        jobId: clientJobId,
+      },
+      create: {
+        jobId: clientJobId,
+        fbPostId: post.fbPostId,
+        postUrl: post.postUrl,
+        authorName: post.authorName,
+        content: post.content ?? null,
+        keywordMatched: post.keywordMatched ?? null,
+      },
+    });
+  }
+
+  for (const profile of profiles) {
+    await prisma.profile.upsert({
+      where: { fbUid: profile.fbUid },
+      update: {
+        jobId: clientJobId,
+        name: profile.name,
+        profileUrl: profile.profileUrl,
+      },
+      create: {
+        jobId: clientJobId,
+        fbUid: profile.fbUid,
+        name: profile.name,
+        profileUrl: profile.profileUrl,
+      },
+    });
+  }
+
+  const firstPost = posts[0];
+  const dbPost = await prisma.post.findUnique({
+    where: { fbPostId: firstPost.fbPostId },
+    select: { id: true },
+  });
+
+  if (!dbPost) {
+    return;
+  }
+
+  for (const interaction of interactions) {
+    const dbProfile = await prisma.profile.findUnique({
+      where: { fbUid: interaction.profileFbUid },
+      select: { id: true },
+    });
+
+    if (!dbProfile) {
+      continue;
+    }
+
+    if (interaction.type === "COMMENT") {
+      if (!interaction.fbCommentId) {
+        continue;
+      }
+
+      await prisma.interaction.upsert({
+        where: { fbCommentId: interaction.fbCommentId },
+        update: {
+          jobId: clientJobId,
+          postId: dbPost.id,
+          profileId: dbProfile.id,
+          type: "COMMENT",
+          commentText: interaction.commentText ?? null,
+          reactionType: null,
+          interactedAt: interaction.interactedAt
+            ? new Date(interaction.interactedAt)
+            : null,
+        },
+        create: {
+          jobId: clientJobId,
+          postId: dbPost.id,
+          profileId: dbProfile.id,
+          type: "COMMENT",
+          fbCommentId: interaction.fbCommentId,
+          commentText: interaction.commentText ?? null,
+          reactionType: null,
+          interactedAt: interaction.interactedAt
+            ? new Date(interaction.interactedAt)
+            : null,
+        },
+      });
+
+      continue;
+    }
+
+    await prisma.interaction.upsert({
+      where: {
+        unique_reaction: {
+          profileId: dbProfile.id,
+          postId: dbPost.id,
+          type: "REACTION",
+        },
+      },
+      update: {
+        jobId: clientJobId,
+        reactionType: interaction.reactionType ?? null,
+        interactedAt: interaction.interactedAt
+          ? new Date(interaction.interactedAt)
+          : null,
+      },
+      create: {
+        jobId: clientJobId,
+        postId: dbPost.id,
+        profileId: dbProfile.id,
+        type: "REACTION",
+        reactionType: interaction.reactionType ?? null,
+        interactedAt: interaction.interactedAt
+          ? new Date(interaction.interactedAt)
+          : null,
+      },
+    });
+  }
 }
 
 class ScraperService {
@@ -184,12 +326,27 @@ class ScraperService {
         const clientJobId = options.clientJobId;
         const artifacts = await collectArtifactPaths(jobId);
 
+        await persistScrapedEntities({
+          prisma,
+          clientJobId,
+          entities: extracted.entities,
+        });
+
+        const [profileCount, interactionCount] = await Promise.all([
+          prisma.profile.count({ where: { jobId: clientJobId } }),
+          prisma.interaction.count({ where: { jobId: clientJobId } }),
+        ]);
+
         await prisma.job.update({
           where: { id: clientJobId },
           data: {
             status: "COMPLETED",
             progress: 100,
-            processedCount: datasetResults.items.length,
+            leadCount: profileCount,
+            processedCount: Math.max(
+              datasetResults.items.length,
+              interactionCount,
+            ),
             finishedAt: new Date(),
             errorMessage: null,
             blockedReason: null,

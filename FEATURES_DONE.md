@@ -82,3 +82,62 @@
 - Added a Facebook PoC entrypoint under `apps/crawler/pocs/` and a `poc:facebook` script.
 - Verified the crawler package builds successfully after the refactor and observability wiring.
 - Wired `debugMode` end-to-end from web crawler form -> jobs API -> worker `/api/scrape` -> scraper execution, with optional rerun override payload.
+
+## OCR Observability Upgrade
+
+- Installed `tesseract.js` in crawler package for Node.js-only OCR.
+- Added `extractTextFromImage(imagePath, lang)` in observability OCR module.
+- Integrated Facebook PoC flow to OCR the `after-scroll` screenshot and print extracted text in terminal.
+- Added OCR artifact writer to persist `{ imagePath, extractedText, createdAt }` into `storage/<jobId>/raw-extracts/<jobId>-ocr-result.json`.
+- Hardened artifact writers to always create directories with `fs.mkdirSync(dirPath, { recursive: true })` before saving files.
+- Bootstrapped repository-kept storage structure with `.gitkeep` files for:
+  - `apps/crawler/storage/`
+  - `apps/crawler/storage/screenshots/`
+  - `apps/crawler/storage/cookies/`
+  - `apps/crawler/storage/raw-extracts/`
+- Updated crawler `.gitignore` to ignore runtime artifacts under `storage/` while keeping `.gitkeep` files tracked.
+
+## Cookie Injection Foundation (DB + Session + API)
+
+- Added Prisma `Account` model for platform account/session storage (`sessionData` JSON + status lifecycle fields).
+- Ran Prisma sync and client generation after schema update.
+- Added Playwright session generator script at `apps/crawler/src/pocs/gen-session.ts` with interactive Enter-to-save flow.
+- Session generator now stores cookie/session state at `apps/crawler/storage/cookies/facebook-session.json` and auto-creates folder recursively.
+- Added crawler npm script: `gen-session`.
+- Added web API endpoint `POST /api/accounts` to persist account session payload with JSON parse validation.
+- API rejects invalid JSON with HTTP 400 and does not log cookie/session payloads.
+
+## Cookie Injection UI + Account Dashboard + Session-Aware Crawler
+
+- Added cookie import modal component at `apps/web/components/crawlers/cookie-import-modal.tsx` with:
+  - Name input
+  - Session JSON textarea
+  - Submit flow to `POST /api/accounts`
+  - Loading state and invalid JSON error handling.
+- Added account management dashboard page at `/accounts` with table columns:
+  - Name
+  - Status
+  - Actions
+- Added account actions in UI: Activate, Disable, Delete.
+- Extended account APIs:
+  - `GET /api/accounts` for listing accounts
+  - `PATCH /api/accounts/[id]` for status updates (`ACTIVE`/`DISABLED`)
+  - `DELETE /api/accounts/[id]` for account removal
+- Added sidebar navigation entry for `/accounts`.
+- Updated Facebook scraper to fetch an active Facebook account session before crawl.
+- Scraper now injects session cookies/localStorage from `account.sessionData` before page navigation when available.
+- Scraper logs warning and falls back to anonymous mode when no active account/session is available.
+- Scraper updates `lastUsedAt` after successful crawl when account session is used.
+
+## Login Wall Detection + Reactions Trigger + End-to-End Reactions UI
+
+- Added login wall detection in Facebook scraper: when crawled URL contains `login`, linked account is marked `EXPIRED`.
+- Added `POST /api/crawl/reactions` API to trigger reactions crawl by `postId`, returning a `jobId` for tracking.
+- Added post data endpoints to support dashboard reaction workflows:
+  - `GET /api/posts?jobId=...` for listing posts in a job context.
+  - `GET /posts/:id/reactions` for fetching reactions of a post.
+  - (Compatibility route retained) `GET /api/posts/:id/reactions`.
+- Upgraded `/datasets` page to support end-to-end reaction flow:
+  - User clicks `View Reactions` on a post.
+  - Frontend calls `GET /posts/:id/reactions`.
+  - If empty, frontend auto-calls `POST /api/crawl/reactions`, shows loading, waits for job completion, then fetches reactions again.

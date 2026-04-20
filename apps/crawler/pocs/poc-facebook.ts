@@ -1,4 +1,9 @@
 import { PlaywrightCrawler } from "crawlee";
+import {
+  extractTextFromImage,
+  saveOcrResultArtifact,
+} from "../src/observability/ocr.js";
+import { captureJobScreenshot } from "../src/observability/screenshot.js";
 
 async function run(): Promise<void> {
   const targetUrl = process.argv[2];
@@ -15,11 +20,31 @@ async function run(): Promise<void> {
     maxRequestsPerCrawl: 1,
     async requestHandler({ page, request, log }) {
       log.info(`POC start: ${request.loadedUrl}`);
+      const jobId = `poc-facebook-${Date.now()}`;
 
       for (let i = 0; i < 3; i += 1) {
         await page.mouse.wheel(0, 2500);
         await page.waitForTimeout(1200);
       }
+
+      const afterScrollScreenshotPath = await captureJobScreenshot({
+        page,
+        jobId,
+        label: "after-scroll",
+      });
+
+      const ocrText = await extractTextFromImage(
+        afterScrollScreenshotPath,
+        "vie",
+      );
+      console.log("OCR text:", ocrText);
+
+      const ocrArtifactPath = await saveOcrResultArtifact({
+        jobId,
+        imagePath: afterScrollScreenshotPath,
+        extractedText: ocrText,
+      });
+      console.log("OCR artifact:", ocrArtifactPath);
 
       const title = await page.title();
       const preview = (await page.locator("body").innerText())

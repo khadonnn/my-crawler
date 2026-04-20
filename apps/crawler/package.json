@@ -10,7 +10,8 @@
     "crawlee": "^3.0.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.2",
-    "playwright": "1.58.2"
+    "playwright": "1.58.2",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@apify/tsconfig": "^0.1.0",
@@ -23,6 +24,7 @@
     "start": "npm run start:dev",
     "start:prod": "node dist/main.js",
     "start:dev": "tsx src/main.ts",
+    "gen-session": "tsx src/pocs/gen-session.ts",
     "poc:facebook": "tsx pocs/poc-facebook.ts",
     "build": "tsc",
     "test": "echo \"Error: oops, the actor has no tests yet, sad!\" && exit 1",

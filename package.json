@@ -2,12 +2,13 @@
   "name": "scraping-platform",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "npm@11.11.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev --parallel",
+    "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "db:generate": "npm --workspace @scraping-platform/db run db:generate",

@@ -1,4 +1,4 @@
-import fs from "node:fs/promises";
+import fs from "node:fs";
 import path from "node:path";
 import type { Page } from "playwright";
 import { getJobScreenshotDirectory } from "./artifact-paths.js";
@@ -13,7 +13,7 @@ export async function captureJobScreenshot(params: {
   label: string;
 }): Promise<string> {
   const directory = getJobScreenshotDirectory(params.jobId);
-  await fs.mkdir(directory, { recursive: true });
+  fs.mkdirSync(directory, { recursive: true });
 
   const fileName = `${Date.now()}-${toSafeFileName(params.label)}.png`;
   const filePath = path.join(directory, fileName);

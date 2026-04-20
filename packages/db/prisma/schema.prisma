@@ -82,15 +82,15 @@ model JobArtifact {
 
 model Post {
   id              String        @id @default(uuid())
-  jobId           String
   fbPostId        String        @unique
   postUrl         String
   authorName      String
   content         String?       @db.Text
   keywordMatched  String?
+  jobId           String?
   scrapedAt       DateTime      @default(now())
 
-  job             Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job             Job?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
   interactions    Interaction[]
 
   @@index([jobId])
@@ -98,7 +98,6 @@ model Post {
 
 model Profile {
   id               String        @id @default(uuid())
-  jobId            String
   fbUid            String        @unique
   name             String
   profileUrl       String
@@ -107,13 +106,16 @@ model Profile {
   hometown         String?
   workplace        String?
   education        String?
+  phone            String?
+  email            String?
   instagramUrl     String?
   otherLinks       Json?
   isProfileScraped Boolean       @default(false)
   leadScore        Int           @default(0)
+  jobId            String?
   lastUpdated      DateTime      @updatedAt
 
-  job              Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job              Job?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
   interactions     Interaction[]
 
   @@index([jobId])
@@ -121,23 +123,24 @@ model Profile {
 
 model Interaction {
   id             String          @id @default(uuid())
-  jobId          String
-  type           InteractionType
-  reactionType   ReactionType?
+  type           String
+  reactionType   String?
+  fbCommentId    String?         @unique
   commentText    String?         @db.Text
   profileId      String
   postId         String
+  jobId          String?
   interactedAt   DateTime?
   scrapedAt      DateTime        @default(now())
 
-  job            Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job            Job?            @relation(fields: [jobId], references: [id], onDelete: SetNull)
   profile        Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
   post           Post            @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([jobId])
   @@index([profileId])
   @@index([postId])
-  @@index([type])
+  @@unique([profileId, postId, type], name: "unique_reaction")
 }
 
 model Proxy {
@@ -153,4 +156,15 @@ model Proxy {
   createdAt   DateTime @default(now())
 
   @@unique([address, port])
+}
+
+model Account {
+  id          String   @id @default(cuid())
+  platform    String
+  name        String
+  sessionData Json
+  status      String   @default("ACTIVE")
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

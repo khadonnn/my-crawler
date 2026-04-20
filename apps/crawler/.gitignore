@@ -3,4 +3,11 @@
 .idea
 dist
 node_modules
-storage
+storage/*
+!storage/.gitkeep
+!storage/screenshots/
+!storage/screenshots/.gitkeep
+!storage/cookies/
+!storage/cookies/.gitkeep
+!storage/raw-extracts/
+!storage/raw-extracts/.gitkeep
