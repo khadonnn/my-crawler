@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     position: "bottom-right",
   },
   transpilePackages: ["@scraping-platform/db", "@scraping-platform/shared"],
+  serverExternalPackages: ["geoip-lite"],
 };
 
 export default nextConfig;

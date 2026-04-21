@@ -12,6 +12,9 @@ type NewCrawlerFormProps = {
   submitLabel?: string;
 };
 
+type CrawlStrategy = "FACEBOOK_DIRECT" | "FACEBOOK_SEARCH";
+type CrawlMode = "DIRECT_URL" | "SEARCH_KEYWORD";
+
 type CreateCrawlerResponse = {
   success?: boolean;
   jobId?: string;
@@ -20,49 +23,122 @@ type CreateCrawlerResponse = {
 
 type ProxyData = {
   id: string;
+  address: string;
+  port: number;
   status: string;
+  countryCode?: string;
   region?: "ANY" | "VN" | "US";
 };
+
+type ProxyCountryStat = {
+  countryCode: string;
+  count: number;
+};
+
+function normalizeCountryCode(value: unknown) {
+  if (typeof value !== "string") {
+    return "UNKNOWN";
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return normalized.length > 0 ? normalized : "UNKNOWN";
+}
+
+function getCountryFlag(countryCode: string) {
+  if (!/^[A-Z]{2}$/.test(countryCode)) {
+    return "🌐";
+  }
+
+  const chars = [...countryCode].map((char) =>
+    String.fromCodePoint(127397 + char.charCodeAt(0)),
+  );
+
+  return chars.join("");
+}
 
 export function NewCrawlerForm({
   onSuccess,
   submitLabel = "Create Crawler Job",
 }: NewCrawlerFormProps) {
+  const [mode, setMode] = useState<CrawlMode>("DIRECT_URL");
   const [url, setUrl] = useState("");
   const [keyword, setKeyword] = useState("");
   const [scrapeMode, setScrapeMode] = useState<
     "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST"
   >("PROFILE_AND_POST");
-  const [proxyRegion, setProxyRegion] = useState<"ANY" | "VN" | "US">("ANY");
+  const [targetCountry, setTargetCountry] = useState("AUTO");
+  const [selectedProxyId, setSelectedProxyId] = useState("");
+  const [workingProxies, setWorkingProxies] = useState<ProxyData[]>([]);
+  const [countryStats, setCountryStats] = useState<ProxyCountryStat[]>([]);
   const [schedule, setSchedule] = useState("");
   const [debugMode, setDebugMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [hasWorkingProxy, setHasWorkingProxy] = useState(false);
   const [proxyCheckLoading, setProxyCheckLoading] = useState(true);
 
+  const isDirectMode = mode === "DIRECT_URL";
+  const strategy: CrawlStrategy = isDirectMode
+    ? "FACEBOOK_DIRECT"
+    : "FACEBOOK_SEARCH";
+
   // Check proxies on mount
   useEffect(() => {
     const checkProxies = async () => {
       try {
-        const response = await fetch("/api/proxies");
-        if (response.ok) {
-          const proxies = (await response.json()) as ProxyData[];
-          const hasWorking = proxies.some((p) => p.status === "WORKING");
-          setHasWorkingProxy(hasWorking);
+        const [proxiesResponse, statsResponse] = await Promise.all([
+          fetch("/api/proxies"),
+          fetch("/api/proxies/stats"),
+        ]);
 
-          // Set default region based on available proxies
-          if (hasWorking) {
-            const workingProxies = proxies.filter(
-              (p) => p.status === "WORKING",
-            );
-            const regions = [
-              ...new Set(workingProxies.map((p) => p.region ?? "ANY")),
-            ];
-            // If all working proxies are in same region, use that region
-            if (regions.length === 1 && regions[0] !== "ANY") {
-              setProxyRegion(regions[0] as "ANY" | "VN" | "US");
-            }
+        if (!proxiesResponse.ok) {
+          throw new Error("Failed to fetch proxies");
+        }
+
+        const proxies = (await proxiesResponse.json()) as ProxyData[];
+        const hasWorking = proxies.some((p) => p.status === "WORKING");
+        const onlyWorking = proxies.filter((p) => p.status === "WORKING");
+        setWorkingProxies(onlyWorking);
+        setHasWorkingProxy(hasWorking);
+
+        if (
+          selectedProxyId &&
+          !onlyWorking.some((proxy) => proxy.id === selectedProxyId)
+        ) {
+          setSelectedProxyId("");
+        }
+
+        if (statsResponse.ok) {
+          const statsPayload = (await statsResponse.json()) as {
+            countries?: Array<{ countryCode: string; count: number }>;
+          };
+
+          const normalizedStats = (statsPayload.countries ?? [])
+            .map((row) => ({
+              countryCode: normalizeCountryCode(row.countryCode),
+              count: row.count,
+            }))
+            .filter((row) => row.count > 0)
+            .sort((a, b) => b.count - a.count);
+
+          setCountryStats(normalizedStats);
+
+          if (
+            targetCountry !== "AUTO" &&
+            !normalizedStats.some((row) => row.countryCode === targetCountry)
+          ) {
+            setTargetCountry("AUTO");
           }
+        } else {
+          const fallbackStats = Array.from(
+            onlyWorking.reduce((map, proxy) => {
+              const code = normalizeCountryCode(proxy.countryCode);
+              map.set(code, (map.get(code) ?? 0) + 1);
+              return map;
+            }, new Map<string, number>()),
+          )
+            .map(([countryCode, count]) => ({ countryCode, count }))
+            .sort((a, b) => b.count - a.count);
+          setCountryStats(fallbackStats);
         }
       } catch (error) {
         console.error("Failed to fetch proxies:", error);
@@ -72,7 +148,7 @@ export function NewCrawlerForm({
     };
 
     checkProxies();
-  }, []);
+  }, [selectedProxyId, targetCountry]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -82,8 +158,13 @@ export function NewCrawlerForm({
       return;
     }
 
-    if (!url.trim()) {
+    if (isDirectMode && !url.trim()) {
       toast.error("Vui long nhap URL can crawl");
+      return;
+    }
+
+    if (!isDirectMode && !keyword.trim()) {
+      toast.error("Vui long nhap tu khoa can tim");
       return;
     }
 
@@ -96,10 +177,14 @@ export function NewCrawlerForm({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          url: url.trim(),
-          keyword: keyword.trim() || undefined,
+          strategy,
+          platform: "FACEBOOK",
+          mode,
+          url: isDirectMode ? url.trim() : undefined,
+          keyword: isDirectMode ? undefined : keyword.trim(),
           scrapeMode,
-          proxyRegion,
+          selectedProxyId: selectedProxyId || undefined,
+          targetCountry,
           schedule: schedule.trim() || undefined,
           debugMode,
         }),
@@ -112,10 +197,12 @@ export function NewCrawlerForm({
       }
 
       toast.success(`Da tao job thanh cong: ${payload.jobId}`);
+      setMode("DIRECT_URL");
       setUrl("");
       setKeyword("");
       setScrapeMode("PROFILE_AND_POST");
-      setProxyRegion("ANY");
+      setTargetCountry("AUTO");
+      setSelectedProxyId("");
       setSchedule("");
       setDebugMode(false);
       onSuccess?.(payload.jobId);
@@ -132,12 +219,12 @@ export function NewCrawlerForm({
     <form className="space-y-4" onSubmit={onSubmit}>
       {proxyCheckLoading ? (
         <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>Đang kiểm tra proxy...</span>
         </div>
       ) : !hasWorkingProxy ? (
         <div className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             Không có proxy WORKING nào. Vui lòng import proxy trước khi tạo job.
           </span>
@@ -145,31 +232,104 @@ export function NewCrawlerForm({
       ) : null}
 
       <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="crawler-url">
-          Target URL
-        </label>
-        <Input
-          id="crawler-url"
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="https://www.facebook.com/groups/..."
-          disabled={loading || !hasWorkingProxy}
-        />
+        <p className="text-sm font-medium">Mode</p>
+        <div className="grid gap-2 md:grid-cols-2">
+          <div className="space-y-2">
+            <label
+              className="text-sm font-medium"
+              htmlFor="crawler-target-country"
+            >
+              Proxy Country
+            </label>
+            <select
+              id="crawler-target-country"
+              className="border-input bg-background ring-offset-background w-full rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+              value={targetCountry}
+              onChange={(event) => setTargetCountry(event.target.value)}
+              disabled={loading || !hasWorkingProxy}
+            >
+              <option value="AUTO">🌍 Auto (Random)</option>
+              {countryStats.map((country) => (
+                <option key={country.countryCode} value={country.countryCode}>
+                  {getCountryFlag(country.countryCode)} {country.countryCode} (
+                  {country.count} proxies)
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Worker se uu tien proxy theo quoc gia nay neu ban khong chi dinh
+              proxy cu the.
+            </p>
+          </div>
+
+          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+            <input
+              type="radio"
+              name="crawler-mode"
+              value="DIRECT_URL"
+              checked={mode === "DIRECT_URL"}
+              onChange={() => setMode("DIRECT_URL")}
+              disabled={loading || !hasWorkingProxy}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block font-medium">URL Truc tiep</span>
+              <span className="text-xs text-muted-foreground">
+                Crawl 1 URL bai viet/trang cu the.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+            <input
+              type="radio"
+              name="crawler-mode"
+              value="SEARCH_KEYWORD"
+              checked={mode === "SEARCH_KEYWORD"}
+              onChange={() => setMode("SEARCH_KEYWORD")}
+              disabled={loading || !hasWorkingProxy}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block font-medium">Tim theo tu khoa</span>
+              <span className="text-xs text-muted-foreground">
+                Search keyword va crawl tu dong.
+              </span>
+            </span>
+          </label>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      {isDirectMode ? (
         <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="crawler-keyword">
-            Keywords (optional)
+          <label className="text-sm font-medium" htmlFor="crawler-url">
+            Target URL
           </label>
           <Input
-            id="crawler-keyword"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="du lich, bat dong san, tuyen dung"
+            id="crawler-url"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://www.facebook.com/groups/..."
             disabled={loading || !hasWorkingProxy}
           />
         </div>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {isDirectMode ? null : (
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="crawler-keyword">
+              Keyword
+            </label>
+            <Input
+              id="crawler-keyword"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="du lich, bat dong san, tuyen dung"
+              disabled={loading || !hasWorkingProxy}
+            />
+          </div>
+        )}
 
         <div className="space-y-2">
           <label className="text-sm font-medium" htmlFor="crawler-schedule">
@@ -211,25 +371,30 @@ export function NewCrawlerForm({
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="crawler-proxy-region">
-            Proxy Region
+          <label className="text-sm font-medium" htmlFor="crawler-proxy-id">
+            Proxy Cu The (optional)
           </label>
           <select
-            id="crawler-proxy-region"
+            id="crawler-proxy-id"
             className="border-input bg-background ring-offset-background w-full rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-            value={proxyRegion}
-            onChange={(event) =>
-              setProxyRegion(event.target.value as "ANY" | "VN" | "US")
-            }
+            value={selectedProxyId}
+            onChange={(event) => setSelectedProxyId(event.target.value)}
             disabled={loading || !hasWorkingProxy}
           >
-            <option value="ANY">Auto / Any region</option>
-            <option value="VN">Vietnam</option>
-            <option value="US">United States</option>
+            <option value="">Auto chon theo country</option>
+            <optgroup label="Proxy cu the">
+              {workingProxies.map((proxy) => {
+                const code = normalizeCountryCode(proxy.countryCode);
+                return (
+                  <option key={proxy.id} value={proxy.id}>
+                    🎯 {proxy.address}:{proxy.port} ({code})
+                  </option>
+                );
+              })}
+            </optgroup>
           </select>
           <p className="text-xs text-muted-foreground">
-            Worker se uu tien chon proxy WORKING theo region nay va luu proxy da
-            dung vao job history.
+            Neu chon proxy cu the, worker uu tien dung dung proxy nay.
           </p>
         </div>
       </div>

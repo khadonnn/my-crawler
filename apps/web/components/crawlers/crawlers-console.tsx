@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
-import { Play, Square, Plus, Trash2, Copy } from "lucide-react";
+import { Play, Square, Plus, Trash2, Copy, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { NewCrawlerForm } from "@/components/crawlers/new-crawler-form";
@@ -25,6 +25,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+import { useSidebar } from "@/components/ui/sidebar";
 
 type JobRow = {
   id: string;
@@ -163,6 +171,13 @@ export function CrawlersConsole() {
     null,
   );
 
+  // Sử dụng hook của shadcn để bắt trạng thái đóng/mở
+  const { open, isMobile } = useSidebar();
+
+  // Chỉ hiển thị text khi sidebar ĐÃ ĐÓNG và không phải mobile.
+  // Các breakpoint của tailwind (như xl:inline) sẽ tự lo việc hiển thị khi màn hình rộng.
+  const showText = !open && !isMobile;
+
   const {
     data: jobs,
     isLoading,
@@ -270,11 +285,12 @@ export function CrawlersConsole() {
   }
 
   return (
-    <section className="space-y-6 py-6">
+    // THÊM w-full min-w-0 max-w-full để ép không giãn ngang ra khỏi màn hình
+    <section className="space-y-6 py-6 w-full min-w-0 max-w-full">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">My Crawlers</h1>
-          <p className="text-muted-foreground max-w-2xl">
+          <p className="text-muted-foreground max-w-2xl truncate">
             Quản lý toàn bộ job crawl đã tạo, theo dõi kết quả, và điều phối lại
             các job lớn trên hệ thống phân tán.
           </p>
@@ -282,7 +298,7 @@ export function CrawlersConsole() {
 
         <Dialog open={openCreate} onOpenChange={setOpenCreate}>
           <DialogTrigger asChild>
-            <Button className="w-full sm:w-auto">
+            <Button className="w-full sm:w-auto shrink-0">
               <Plus className="mr-2 size-4" />
               New Crawler
             </Button>
@@ -307,8 +323,8 @@ export function CrawlersConsole() {
 
         <Dialog
           open={Boolean(deleteTargetJobId)}
-          onOpenChange={(open) => {
-            if (!open) {
+          onOpenChange={(isOpen) => {
+            if (!isOpen) {
               setDeleteTargetJobId(null);
             }
           }}
@@ -348,7 +364,7 @@ export function CrawlersConsole() {
         </Dialog>
       </div>
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>Job History</CardTitle>
           <CardDescription>
@@ -356,9 +372,9 @@ export function CrawlersConsole() {
             thái và hành động vận hành.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-w-0 p-0 sm:p-6 sm:pt-0">
           {isLoading ? (
-            <div className="space-y-2">
+            <div className="space-y-2 p-6">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
@@ -366,7 +382,7 @@ export function CrawlersConsole() {
           ) : null}
 
           {!isLoading && error ? (
-            <div className="space-y-3 text-center">
+            <div className="space-y-3 text-center p-6">
               <p className="text-sm text-destructive">
                 Lỗi tại lịch sử jobs:{" "}
                 {String(
@@ -380,178 +396,252 @@ export function CrawlersConsole() {
           ) : null}
 
           {!isLoading && !error && jobs?.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
+            <p className="text-muted-foreground text-sm p-6">
               Chưa có crawler job nào. Bấm New Crawler để tạo job đầu tiên.
             </p>
           ) : null}
 
           {!isLoading && !error && jobs && jobs.length > 0 ? (
-            <div className="rounded-lg border">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="border-b bg-muted/40">
-                    <tr>
-                      <th className="px-2 py-2 text-left font-medium">
-                        Job ID
-                      </th>
-                      <th className="px-2 py-2 text-left font-medium">URL</th>
-                      <th className="px-2 py-2 text-left font-medium">Proxy</th>
-                      <th className="px-2 py-2 text-left font-medium">
-                        Ngày chạy
-                      </th>
-                      <th className="px-2 py-2 text-left font-medium">Leads</th>
-                      <th className="px-2 py-2 text-left font-medium">
-                        Status
-                      </th>
-                      <th className="px-2 py-2 text-left font-medium">
-                        Next Action
-                      </th>
-                      <th className="px-2 py-2 text-right font-medium">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {jobs.map((job) => {
-                      const isActing = actingJobId === job.id;
-                      const canStop =
-                        job.status === "RUNNING" || job.status === "PENDING";
-                      const canDelete =
-                        job.status === "RUNNING" || job.status === "PENDING";
-                      const canRetry =
-                        job.status === "FAILED" &&
-                        job.retryCount < job.maxRetry;
+            <div className="rounded-lg border border-x-0 sm:border-x">
+              {/* THÊM overflow-x-auto w-full để bảng cuộn bên TRONG Card, không ép màn hình ra ngoài */}
+              <div className="overflow-x-auto w-full">
+                <TooltipProvider delayDuration={300}>
+                  <table className="w-full text-xs">
+                    <thead className="border-b bg-muted/40">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                          Job ID
+                        </th>
+                        <th className="px-3 py-2 text-left font-medium min-w-[200px]">
+                          URL
+                        </th>
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                          Proxy
+                        </th>
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                          Ngày chạy
+                        </th>
+                        <th className="px-3 py-2 text-center font-medium">
+                          Leads
+                        </th>
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                          Status
+                        </th>
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                          Next Action
+                        </th>
+                        <th className="px-3 py-2 text-right font-medium whitespace-nowrap">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {jobs.map((job) => {
+                        const isActing = actingJobId === job.id;
+                        const canStop =
+                          job.status === "RUNNING" || job.status === "PENDING";
+                        const canDelete =
+                          job.status === "RUNNING" ||
+                          job.status === "PENDING" ||
+                          job.status === "FAILED" ||
+                          job.status === "COMPLETED" ||
+                          job.status === "CANCELLED";
+                        const canRetry =
+                          job.status === "FAILED" &&
+                          job.retryCount < job.maxRetry;
 
-                      return (
-                        <tr key={job.id} className="hover:bg-muted/30">
-                          <td className="px-4 py-3 font-mono text-xs">
-                            {job.id.slice(0, 8)}...
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="max-w-sm space-y-1">
-                              <div className="flex items-center gap-2">
-                                <p className="truncate font-medium text-sm">
-                                  {job.sourceValue}
+                        return (
+                          <tr key={job.id} className="hover:bg-muted/30">
+                            <td className="px-3 py-3 font-mono text-xs whitespace-nowrap">
+                              {job.id.slice(0, 8)}...
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="max-w-[220px] space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="truncate font-medium text-sm">
+                                    {job.sourceValue}
+                                  </p>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-6 w-6 flex-shrink-0"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(
+                                        job.sourceValue,
+                                      );
+                                      toast.success("Đã copy URL");
+                                    }}
+                                    title="Copy URL"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                                {job.keyword ? (
+                                  <p className="text-muted-foreground text-xs truncate">
+                                    Keyword: {job.keyword}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-xs whitespace-nowrap">
+                              <div className="space-y-1">
+                                <p className="font-medium">
+                                  Req: {job.requestedProxyRegion}
                                 </p>
+                                <p className="text-muted-foreground">
+                                  Used:{" "}
+                                  {job.usedProxyAddress && job.usedProxyPort
+                                    ? `${job.usedProxyAddress}:${job.usedProxyPort}`
+                                    : "Auto"}
+                                </p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                              {new Intl.DateTimeFormat("vi-VN", {
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              }).format(new Date(job.createdAt))}
+                            </td>
+                            <td className="px-3 py-3 font-semibold text-center">
+                              {job.leadCount}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <div className="flex flex-col gap-1 items-start">
+                                <Badge className={statusTone(job.status)}>
+                                  {job.status}
+                                </Badge>
+                                {job.status === "FAILED" ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={blockedReasonTone(
+                                      job.blockedReason,
+                                    )}
+                                  >
+                                    {blockedReasonLabel(job.blockedReason)}
+                                  </Badge>
+                                ) : null}
+                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                  Retry: {job.retryCount}/{job.maxRetry}
+                                </p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                              {nextActionLabel(job)}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size={showText ? "sm" : "icon"}
+                                      variant="outline"
+                                      className={`transition-all cursor-pointer ${showText ? "h-8 px-3" : "h-8 w-8"}`}
+                                      disabled={isActing}
+                                      onClick={() => handleRerun(job.id)}
+                                    >
+                                      <Play
+                                        className={
+                                          showText
+                                            ? "mr-1.5 size-3.5"
+                                            : "size-3.5"
+                                        }
+                                      />
+                                      {showText && <span>Rerun</span>}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Chạy lại Job</TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size={showText ? "sm" : "icon"}
+                                      variant="secondary"
+                                      className={`transition-all ${showText ? "h-8 px-3" : "h-8 w-8"}`}
+                                      disabled={isActing || !canRetry}
+                                      onClick={() => void handleRetry(job.id)}
+                                    >
+                                      <RotateCcw
+                                        className={
+                                          showText
+                                            ? "mr-1.5 size-3.5"
+                                            : "size-3.5"
+                                        }
+                                      />
+                                      {showText && <span>Retry</span>}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Thử lại Job</TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size={showText ? "sm" : "icon"}
+                                      variant="ghost"
+                                      className={`text-amber-600 hover:text-amber-700 hover:bg-amber-100/50 transition-all ${
+                                        showText ? "h-8 px-3" : "h-8 w-8"
+                                      }`}
+                                      disabled={isActing || !canStop}
+                                      onClick={() => handleStop(job.id)}
+                                    >
+                                      <Square
+                                        className={
+                                          showText
+                                            ? "mr-1.5 size-3.5"
+                                            : "size-3.5"
+                                        }
+                                      />
+                                      {showText && <span>Stop</span>}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Dừng Job</TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size={showText ? "sm" : "icon"}
+                                      variant="ghost"
+                                      className={`cursor-pointer text-destructive hover:bg-destructive/10 transition-all ${
+                                        showText ? "h-8 px-3" : "h-8 w-8"
+                                      }`}
+                                      disabled={isActing || !canDelete}
+                                      onClick={() =>
+                                        setDeleteTargetJobId(job.id)
+                                      }
+                                    >
+                                      <Trash2
+                                        className={
+                                          showText
+                                            ? "mr-1.5 size-3.5"
+                                            : "size-3.5"
+                                        }
+                                      />
+                                      {showText && <span>Delete</span>}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Xóa Job</TooltipContent>
+                                </Tooltip>
+
                                 <Button
                                   size="sm"
-                                  variant="ghost"
-                                  className="h-6 w-6 p-0 flex-shrink-0"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(
-                                      job.sourceValue,
-                                    );
-                                    toast.success("Đã copy URL");
-                                  }}
-                                  title="Copy URL"
+                                  variant="secondary"
+                                  className="h-8 px-3"
+                                  asChild
                                 >
-                                  <Copy className="h-3.5 w-3.5" />
+                                  <Link href={`/datasets?jobId=${job.id}`}>
+                                    Data
+                                  </Link>
                                 </Button>
                               </div>
-                              {job.keyword ? (
-                                <p className="text-muted-foreground text-xs">
-                                  Keyword: {job.keyword}
-                                </p>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-xs">
-                            <div className="space-y-1">
-                              <p className="font-medium">
-                                Requested: {job.requestedProxyRegion}
-                              </p>
-                              <p className="text-muted-foreground">
-                                Used:{" "}
-                                {job.usedProxyAddress && job.usedProxyPort
-                                  ? `${job.usedProxyAddress}:${job.usedProxyPort} (${job.usedProxyRegion ?? "ANY"})`
-                                  : "Auto / none selected"}
-                              </p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground">
-                            {new Intl.DateTimeFormat("vi-VN", {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            }).format(new Date(job.createdAt))}
-                          </td>
-                          <td className="px-4 py-3 font-semibold">
-                            {job.leadCount}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-col gap-1">
-                              <Badge className={statusTone(job.status)}>
-                                {job.status}
-                              </Badge>
-                              {job.status === "FAILED" ? (
-                                <Badge
-                                  variant="outline"
-                                  className={blockedReasonTone(
-                                    job.blockedReason,
-                                  )}
-                                >
-                                  {blockedReasonLabel(job.blockedReason)}
-                                </Badge>
-                              ) : null}
-                              <p className="text-[11px] text-muted-foreground">
-                                Retry: {job.retryCount}/{job.maxRetry}
-                              </p>
-                              <p className="truncate text-[11px] text-muted-foreground">
-                                Lock: {job.lockedBy ?? "none"}
-                              </p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground">
-                            {nextActionLabel(job)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={isActing}
-                                onClick={() => handleRerun(job.id)}
-                              >
-                                <Play className="mr-1 size-3.5" />
-                                Rerun
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={isActing || !canRetry}
-                                onClick={() => void handleRetry(job.id)}
-                              >
-                                Retry
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={isActing || !canStop}
-                                onClick={() => handleStop(job.id)}
-                              >
-                                <Square className="mr-1 size-3.5" />
-                                Stop
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                disabled={isActing || !canDelete}
-                                onClick={() => setDeleteTargetJobId(job.id)}
-                              >
-                                <Trash2 className="mr-1 size-3.5" />
-                                Delete
-                              </Button>
-                              <Button size="sm" variant="secondary" asChild>
-                                <Link href={`/datasets?jobId=${job.id}`}>
-                                  View Data
-                                </Link>
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </TooltipProvider>
               </div>
             </div>
           ) : null}

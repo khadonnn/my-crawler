@@ -1,8 +1,15 @@
 import { getPrisma } from "@scraping-platform/db";
 import { checkProxyHealth } from "@/lib/server/proxy-health";
 import { NextResponse } from "next/server";
+import { isIP } from "node:net";
 
 export const runtime = "nodejs";
+
+type GeoIpLike = {
+  lookup: (ip: string) => { country?: string } | null;
+};
+
+let cachedGeoIpModule: GeoIpLike | null = null;
 
 type ProxyRegion = "ANY" | "VN" | "US";
 
@@ -11,7 +18,9 @@ type ParsedProxy = {
   port: number;
   username: string | null;
   password: string | null;
+  countryCode: string;
   region: ProxyRegion;
+  hasExplicitRegion: boolean;
   status: "UNKNOWN";
 };
 
@@ -28,6 +37,70 @@ function normalizeProxyRegion(value: unknown): ProxyRegion {
   return "ANY";
 }
 
+function normalizeCountryCode(value: unknown): string {
+  if (typeof value !== "string") {
+    return "UNKNOWN";
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return normalized.length > 0 ? normalized : "UNKNOWN";
+}
+
+function mapCountryCodeToLegacyRegion(countryCode: string): ProxyRegion {
+  return countryCode === "VN" ? "VN" : countryCode === "US" ? "US" : "ANY";
+}
+
+async function importGeoIp(): Promise<GeoIpLike> {
+  if (cachedGeoIpModule) {
+    return cachedGeoIpModule;
+  }
+
+  const module = (await import("geoip-lite")) as unknown as {
+    default?: GeoIpLike;
+    lookup?: GeoIpLike["lookup"];
+  };
+
+  if (module.default?.lookup) {
+    cachedGeoIpModule = module.default;
+    return cachedGeoIpModule;
+  }
+
+  if (module.lookup) {
+    cachedGeoIpModule = { lookup: module.lookup };
+    return cachedGeoIpModule;
+  }
+
+  throw new Error("geoip-lite module missing lookup function");
+}
+
+async function detectProxyLocation(address: string): Promise<{
+  countryCode: string;
+  region: ProxyRegion;
+}> {
+  if (!address || isIP(address) === 0) {
+    return {
+      countryCode: "UNKNOWN",
+      region: "ANY",
+    };
+  }
+
+  try {
+    const geoip = await importGeoIp();
+    const lookup = geoip.lookup(address);
+    const countryCode = normalizeCountryCode(lookup?.country);
+
+    return {
+      countryCode,
+      region: mapCountryCodeToLegacyRegion(countryCode),
+    };
+  } catch {
+    return {
+      countryCode: "UNKNOWN",
+      region: "ANY",
+    };
+  }
+}
+
 async function hasProxyRegionColumn(prisma: ReturnType<typeof getPrisma>) {
   const rows = await prisma.$queryRawUnsafe<Array<{ exists: boolean }>>(
     `SELECT EXISTS (
@@ -35,6 +108,19 @@ async function hasProxyRegionColumn(prisma: ReturnType<typeof getPrisma>) {
       FROM information_schema.columns
       WHERE table_name = 'Proxy'
         AND column_name = 'region'
+    ) AS "exists"`,
+  );
+
+  return Boolean(rows[0]?.exists);
+}
+
+async function hasProxyCountryCodeColumn(prisma: ReturnType<typeof getPrisma>) {
+  const rows = await prisma.$queryRawUnsafe<Array<{ exists: boolean }>>(
+    `SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = 'Proxy'
+        AND column_name = 'countryCode'
     ) AS "exists"`,
   );
 
@@ -82,11 +168,13 @@ function parseProxyLine(line: string): ParsedProxy | null {
 
   let region: ProxyRegion = "ANY";
   let credentialParts = rest;
+  let hasExplicitRegion = false;
 
   if (rest.length > 0) {
     const last = normalizeProxyRegion(rest[rest.length - 1]);
     if (last !== "ANY" || rest[rest.length - 1].toUpperCase() === "ANY") {
       region = last;
+      hasExplicitRegion = true;
       credentialParts = rest.slice(0, -1);
     }
   }
@@ -103,7 +191,9 @@ function parseProxyLine(line: string): ParsedProxy | null {
     port,
     username: usernameRaw || null,
     password: passwordRaw || null,
+    countryCode: "UNKNOWN",
     region,
+    hasExplicitRegion,
     status: "UNKNOWN",
   };
 }
@@ -112,7 +202,10 @@ export async function POST(req: Request) {
   try {
     const { proxyList } = await req.json();
     const prisma = getPrisma();
-    const regionColumnExists = await hasProxyRegionColumn(prisma);
+    const [regionColumnExists, countryCodeColumnExists] = await Promise.all([
+      hasProxyRegionColumn(prisma),
+      hasProxyCountryCodeColumn(prisma),
+    ]);
 
     const normalizedLines = normalizeProxyList(proxyList);
     if (normalizedLines.length === 0) {
@@ -134,39 +227,56 @@ export async function POST(req: Request) {
       .filter((row): row is ParsedProxy => row !== null);
 
     const uniqueRows = deduplicateRows(parsedRows);
+    const rowsWithLocation = await Promise.all(
+      uniqueRows.map(async (row) => {
+        const detectedLocation = await detectProxyLocation(row.address);
+        const countryCode = detectedLocation.countryCode;
+        const region = row.hasExplicitRegion
+          ? row.region
+          : mapCountryCodeToLegacyRegion(countryCode);
+
+        return {
+          ...row,
+          countryCode,
+          region,
+        };
+      }),
+    );
 
     let imported = 0;
-    if (uniqueRows.length > 0) {
+    if (rowsWithLocation.length > 0) {
       try {
         const result = await prisma.proxy.createMany({
-          data: uniqueRows.map((row) =>
-            regionColumnExists
-              ? row
-              : {
-                  address: row.address,
-                  port: row.port,
-                  username: row.username,
-                  password: row.password,
-                  status: row.status,
-                },
-          ),
+          data: rowsWithLocation.map((row) => ({
+            address: row.address,
+            port: row.port,
+            username: row.username,
+            password: row.password,
+            status: row.status,
+            ...(regionColumnExists ? { region: row.region } : {}),
+            ...(countryCodeColumnExists
+              ? { countryCode: row.countryCode }
+              : {}),
+          })),
           skipDuplicates: true,
         });
         imported = result.count;
       } catch {
         // Fallback for environments where bulk insert may fail unexpectedly.
-        for (const row of uniqueRows) {
+        for (const row of rowsWithLocation) {
           try {
             await prisma.proxy.create({
-              data: regionColumnExists
-                ? row
-                : {
-                    address: row.address,
-                    port: row.port,
-                    username: row.username,
-                    password: row.password,
-                    status: row.status,
-                  },
+              data: {
+                address: row.address,
+                port: row.port,
+                username: row.username,
+                password: row.password,
+                status: row.status,
+                ...(regionColumnExists ? { region: row.region } : {}),
+                ...(countryCodeColumnExists
+                  ? { countryCode: row.countryCode }
+                  : {}),
+              },
             });
             imported += 1;
           } catch {
@@ -176,7 +286,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const failed = invalidCount + (uniqueRows.length - imported);
+    const failed = invalidCount + (rowsWithLocation.length - imported);
 
     // Auto-check newly imported (and matching existing) proxies so UI can show WORKING/DEAD quickly.
     const candidates = await prisma.proxy.findMany({

@@ -9,6 +9,8 @@ type CreateCrawlerJobInput = {
   mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
   scrapeMode?: "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST";
   proxyRegion?: "ANY" | "VN" | "US";
+  selectedProxyId?: string;
+  targetCountry?: string;
   schedule?: string;
   debugMode?: boolean;
 };
@@ -22,6 +24,7 @@ export type JobListItem = {
   sourceValue: string;
   url: string | null;
   keyword: string | null;
+  searchProgressIndex: number;
   requestedProxyRegion: "ANY" | "VN" | "US";
   usedProxyId: string | null;
   usedProxyAddress: string | null;
@@ -73,6 +76,17 @@ function normalizeOptionalText(value?: string) {
   return normalized ? normalized : undefined;
 }
 
+function normalizeCountryCode(value?: string) {
+  const normalized = value?.trim().toUpperCase();
+  return normalized && normalized.length > 0 ? normalized : "AUTO";
+}
+
+function mapCountryCodeToLegacyRegion(
+  countryCode: string,
+): "ANY" | "VN" | "US" {
+  return countryCode === "VN" ? "VN" : countryCode === "US" ? "US" : "ANY";
+}
+
 async function parseWorkerError(response: Response) {
   try {
     const payload = (await response.json()) as { error?: string };
@@ -88,7 +102,10 @@ export async function createCrawlerJob(input: CreateCrawlerJobInput) {
   const platform = input.platform ?? "FACEBOOK";
   const mode = input.mode ?? "DIRECT_URL";
   const scrapeMode = input.scrapeMode ?? "PROFILE_AND_POST";
-  const proxyRegion = input.proxyRegion ?? "ANY";
+  const targetCountry = normalizeCountryCode(input.targetCountry);
+  const proxyRegion =
+    input.proxyRegion ?? mapCountryCodeToLegacyRegion(targetCountry);
+  const selectedProxyId = normalizeOptionalText(input.selectedProxyId);
   const schedule = normalizeOptionalText(input.schedule);
   const debugMode = Boolean(input.debugMode);
 
@@ -111,6 +128,7 @@ export async function createCrawlerJob(input: CreateCrawlerJobInput) {
       sourceValue,
       url: url ?? null,
       keyword: keyword ?? null,
+      searchProgressIndex: 0,
       requestedProxyRegion: proxyRegion,
       status: "PENDING",
       progress: 0,
@@ -129,6 +147,8 @@ export async function createCrawlerJob(input: CreateCrawlerJobInput) {
         mode,
         scrapeMode,
         proxyRegion,
+        selectedProxyId,
+        targetCountry,
         schedule,
         debugMode,
         clientJobId: job.id,
@@ -187,6 +207,7 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
         sourceValue: true,
         url: true,
         keyword: true,
+        searchProgressIndex: true,
         requestedProxyRegion: true,
         usedProxyId: true,
         usedProxyAddress: true,
@@ -246,6 +267,7 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
       sourceValue: job.sourceValue,
       url: job.url,
       keyword: job.keyword,
+      searchProgressIndex: job.searchProgressIndex,
       requestedProxyRegion: job.requestedProxyRegion,
       usedProxyId: job.usedProxyId,
       usedProxyAddress: job.usedProxyAddress,

@@ -11,6 +11,8 @@ export async function POST(request: NextRequest) {
       mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
       scrapeMode?: "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST";
       proxyRegion?: "ANY" | "VN" | "US";
+      selectedProxyId?: string;
+      targetCountry?: string;
       schedule?: string;
       debugMode?: boolean;
     };
@@ -40,6 +42,8 @@ export async function POST(request: NextRequest) {
       mode,
       scrapeMode: body.scrapeMode,
       proxyRegion: body.proxyRegion,
+      selectedProxyId: body.selectedProxyId,
+      targetCountry: body.targetCountry,
       schedule: body.schedule,
       debugMode: body.debugMode,
     });

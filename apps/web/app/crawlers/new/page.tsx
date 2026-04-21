@@ -13,7 +13,7 @@ export default function NewCrawlerPage() {
         </p>
       </div>
 
-      <div className="max-w-3xl rounded-xl border p-4">
+      <div className="max-w-3xl mx-auto rounded-xl border p-4">
         <NewCrawlerForm />
       </div>
     </section>

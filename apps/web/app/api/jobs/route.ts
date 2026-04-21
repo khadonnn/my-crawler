@@ -16,18 +16,29 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
+      strategy?: "FACEBOOK_DIRECT" | "FACEBOOK_SEARCH";
       url?: string;
       keyword?: string;
       platform?: "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
       mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
       scrapeMode?: "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST";
       proxyRegion?: "ANY" | "VN" | "US";
+      selectedProxyId?: string;
+      targetCountry?: string;
       schedule?: string;
       debugMode?: boolean;
     };
 
-    const platform = body.platform ?? "FACEBOOK";
-    const mode = body.mode ?? "DIRECT_URL";
+    const platform =
+      body.strategy === "FACEBOOK_DIRECT" || body.strategy === "FACEBOOK_SEARCH"
+        ? "FACEBOOK"
+        : (body.platform ?? "FACEBOOK");
+    const mode =
+      body.strategy === "FACEBOOK_SEARCH"
+        ? "SEARCH_KEYWORD"
+        : body.strategy === "FACEBOOK_DIRECT"
+          ? "DIRECT_URL"
+          : (body.mode ?? "DIRECT_URL");
     const url = body.url?.trim();
     const keyword = body.keyword?.trim();
 
@@ -52,6 +63,8 @@ export async function POST(request: NextRequest) {
       mode,
       scrapeMode: body.scrapeMode,
       proxyRegion: body.proxyRegion,
+      selectedProxyId: body.selectedProxyId,
+      targetCountry: body.targetCountry,
       schedule: body.schedule,
       debugMode: body.debugMode,
     });

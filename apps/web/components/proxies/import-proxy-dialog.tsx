@@ -82,7 +82,8 @@ export function ImportProxyDialog({ onSuccess }: { onSuccess?: () => void }) {
           <DialogTitle>Nhập Danh Sách Proxy</DialogTitle>
           <DialogDescription>
             Định dạng: ip:port, ip:port:user:pass, hoặc thêm region ở cuối dòng
-            (VN/US/ANY). Ví dụ: ip:port:user:pass:VN
+            (VN/US/ANY). Nếu không nhập region, hệ thống tự detect theo IP. Ví
+            dụ: ip:port:user:pass:VN
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

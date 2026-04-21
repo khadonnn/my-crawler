@@ -2,6 +2,17 @@
 
 ## Current Focus
 
+- Proxy selection + region detection reliability is completed:
+  - `/crawlers/new` now supports choosing a specific imported proxy (WORKING) in addition to region-based auto selection.
+  - Job payload now supports `selectedProxyId` and worker honors selected proxy first, then region fallback.
+  - `geoip-lite` runtime dependency is now installed in `apps/web`, so proxy region auto-detect on web API routes works as intended.
+  - Build validation passed for both web and crawler packages.
+
+- Proxy region intelligence is completed:
+  - Proxy import/create now auto-detects region via GeoIP when region is omitted.
+  - Crawler `/crawlers/new` Proxy Region selector now reflects imported proxy regions dynamically.
+  - Build validation passed for web package.
+
 - Final production hardening (durable retry + timeout semantics + operator controls) is completed:
   - Worker now runs periodic durable retry pickup from DB (`retryScheduledFor <= now`) instead of volatile in-memory delayed retry.
   - Worker now enforces hard timeout from `lastHeartbeatAt` and marks stale `RUNNING` jobs as `FAILED/TIMEOUT`.
@@ -36,7 +47,12 @@
 - Add small E2E smoke script to verify: failed -> retry scheduled -> worker restart -> retry still executes.
 
 - Review whether the onboarding flow should also add a CTA on `/accounts` and `/crawlers` for a fully chained route experience.
-- Add full extraction logic for `FacebookSearchStrategy` (collect result posts/comments/reactions from search results).
+- Add full extraction logic for `FacebookSearchStrategy` (collect result posts/comments/reactions from search results). ✅ Done
+- Apply deep scrape safety discipline for Facebook direct scrape (scroll/comment/time limits). ✅ Done
+- Upgrade Crawlers create-job UI with dynamic DIRECT/SEARCH mode and strategy payload mapping. ✅ Done
+- Final optimization pass: conditional render UI + incremental persist + phased progress/logging. ✅ Done
+- Add resumable search checkpoint index (`searchProgressIndex`) to continue after restart/retry. ✅ Done
+- Auto-detect proxy region on import and sync crawler region selector with imported proxy regions. ✅ Done
 - Implement the first non-Facebook search strategy (Google Search or YouTube Search).
 - Extend job history table to show progress bar inline (if time permits).
 - Refactor any remaining backward-compat routes if schema feels too complex.

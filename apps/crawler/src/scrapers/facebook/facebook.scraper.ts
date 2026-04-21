@@ -8,6 +8,7 @@ import type {
   ScrapedPostEntity,
   ScrapedProfileEntity,
   ScrapeExecutionInput,
+  ScrapeOptions,
   ScrapeExecutionOutput,
 } from "../base/scraper.types.js";
 import { FACEBOOK_SELECTORS } from "./facebook.selectors.js";
@@ -17,6 +18,11 @@ import {
   saveRawExtract,
 } from "../../observability/index.js";
 import { ScraperError } from "../../errors/scraper.error.js";
+import {
+  closeBrowserSafely,
+  enforceProxyRequired,
+  verifyProxyEgressIp,
+} from "../base/proxy-safety.js";
 
 type AccountSession = {
   id: string;
@@ -50,35 +56,12 @@ const FB_NETWORKIDLE_TIMEOUT_MS = FAST_LOCAL_MODE ? 7_000 : 15_000;
 const FB_DOMCONTENT_TIMEOUT_MS = FAST_LOCAL_MODE ? 5_000 : 10_000;
 
 const FB_MAX_COMMENT_SCAN_NODES = FAST_LOCAL_MODE ? 120 : 320;
-const FB_MAX_COMMENT_RESULTS = FAST_LOCAL_MODE ? 20 : 30;
+const FB_MAX_COMMENT_RESULTS = 15;
 const FB_MAX_REACTION_SCAN_NODES = FAST_LOCAL_MODE ? 120 : 280;
 const FB_MAX_REACTION_RESULTS = FAST_LOCAL_MODE ? 12 : 20;
-const FB_MAX_SCROLL = FAST_LOCAL_MODE ? 2 : 15;
+const FB_MAX_SCROLL = 3;
 const FB_SCROLL_WAIT_MS = FAST_LOCAL_MODE ? 700 : 2_000;
-const FB_GLOBAL_TIMEOUT_MS = 60_000;
-
-async function withTimeout<T>(
-  task: Promise<T>,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  try {
-    return await Promise.race([
-      task,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new ScraperError("TIMEOUT", message));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
+const MAX_POST_TIME_MS = 30_000;
 
 async function detectBlockedReasonOnPage(
   page: Page,
@@ -263,6 +246,7 @@ async function extractCommentCandidates(
       ).slice(0, limits.maxScanNodes);
 
       const values = [];
+      let commentsCount = 0;
       for (const node of nodes) {
         const htmlNode = node as HTMLElement;
         const text = (htmlNode.innerText ?? "").trim().replace(/\s+/g, " ");
@@ -306,6 +290,11 @@ async function extractCommentCandidates(
           fbCommentId,
           text,
         });
+        commentsCount += 1;
+
+        if (commentsCount >= limits.maxResults) {
+          break;
+        }
       }
 
       const seen = new Set<string>();
@@ -482,13 +471,14 @@ function buildEntities(params: {
           },
         ];
 
-  const comments = params.commentCandidates.slice(0, 20);
+  const comments = params.commentCandidates.slice(0, FB_MAX_COMMENT_RESULTS);
   const commentInteractions: ScrapedInteractionEntity[] = comments.map(
     (comment, index) => ({
       type: "COMMENT",
       fbCommentId:
         comment.fbCommentId ??
         `c-${post.fbPostId}-${toStableNumericHash(`${comment.text}-${index}`)}`,
+      fbPostId: post.fbPostId,
       commentText: comment.text,
       profileFbUid: availableProfiles[index % availableProfiles.length].fbUid,
     }),
@@ -503,6 +493,7 @@ function buildEntities(params: {
       return {
         type: "REACTION",
         reactionType: normalizedReactionType ?? "LIKE",
+        fbPostId: post.fbPostId,
         profileFbUid: availableProfiles[index % availableProfiles.length].fbUid,
       };
     });
@@ -564,7 +555,13 @@ function isBrowserStorageState(value: unknown): value is BrowserStorageState {
 export class FacebookScraper extends BaseScraper {
   readonly platform = "facebook";
 
-  async execute(input: ScrapeExecutionInput): Promise<ScrapeExecutionOutput> {
+  async execute(
+    input: ScrapeExecutionInput,
+    _options?: ScrapeOptions,
+  ): Promise<ScrapeExecutionOutput> {
+    enforceProxyRequired(input.proxy);
+    const assignedProxy = input.proxy!;
+
     const targetUrl = input.url?.trim();
     if (!targetUrl) {
       throw new ScraperError("UNKNOWN", "DIRECT_URL requires url");
@@ -649,14 +646,48 @@ export class FacebookScraper extends BaseScraper {
             ]
           : undefined,
         async requestHandler({ page, request, log }) {
-          const output = await withTimeout(
-            (async (): Promise<ScrapeExecutionOutput> => {
-              const reportProgress = async (progress: number, step: string) => {
-                if (input.onProgress) {
-                  await input.onProgress(progress, step);
-                }
-              };
+          try {
+            if (!input.proxy) {
+              throw new ScraperError(
+                "PROXY_REQUIRED",
+                "System requires proxy but none was provided",
+              );
+            }
 
+            logJobEvent("info", {
+              jobId: input.jobId,
+              platform: "facebook",
+              phase: "proxy",
+              step: "browser-launched-with-proxy",
+              message: "Browser launched with proxy",
+              meta: {
+                proxyServer: `${input.proxy.ip}:${input.proxy.port}`,
+              },
+            });
+
+            await verifyProxyEgressIp({
+              page,
+              jobId: input.jobId,
+              platform: "facebook",
+              proxy: input.proxy,
+            });
+
+            const reportProgress = async (progress: number, step: string) => {
+              if (input.onProgress) {
+                await input.onProgress(progress, step);
+              }
+            };
+
+            const profileMap = new Map<string, ExtractedProfileCandidate>();
+            const commentMap = new Map<string, ExtractedCommentCandidate>();
+            const reactionList: ExtractedReactionCandidate[] = [];
+            let rawText = "";
+            let title = "Facebook";
+            let feedExists = false;
+            let hitTimeLimit = false;
+            let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+            const scrapePostTask = (async (): Promise<void> => {
               log.info(`STEP 1: Open URL ${request.loadedUrl ?? targetUrl}`);
               logJobEvent("info", {
                 jobId: input.jobId,
@@ -672,8 +703,12 @@ export class FacebookScraper extends BaseScraper {
                         port: input.proxy.port,
                         region: input.proxy.region,
                       }
-                    : null,
+                    : undefined,
                 },
+              });
+
+              await page.goto(request.loadedUrl ?? targetUrl, {
+                waitUntil: "domcontentloaded",
               });
               await reportProgress(50, "step-open-url");
 
@@ -748,11 +783,6 @@ export class FacebookScraper extends BaseScraper {
               }
 
               log.info("STEP 3: Scroll + extract with limits");
-              const profileMap = new Map<string, ExtractedProfileCandidate>();
-              const commentMap = new Map<string, ExtractedCommentCandidate>();
-              const reactionList: ExtractedReactionCandidate[] = [];
-              let rawText = "";
-
               for (
                 let scrollCount = 0;
                 scrollCount < FB_MAX_SCROLL;
@@ -763,11 +793,12 @@ export class FacebookScraper extends BaseScraper {
                   await page.waitForTimeout(FB_SCROLL_WAIT_MS);
                 }
 
-                const blockedReason = await detectBlockedReasonOnPage(page);
-                if (blockedReason) {
+                const scrollBlockedReason =
+                  await detectBlockedReasonOnPage(page);
+                if (scrollBlockedReason) {
                   throw new ScraperError(
-                    blockedReason,
-                    `Facebook blocked during scroll: ${blockedReason}`,
+                    scrollBlockedReason,
+                    `Facebook blocked during scroll: ${scrollBlockedReason}`,
                   );
                 }
 
@@ -789,6 +820,10 @@ export class FacebookScraper extends BaseScraper {
                 for (const comment of comments) {
                   const key = `${comment.fbCommentId ?? "none"}::${comment.text}`;
                   commentMap.set(key, comment);
+
+                  if (commentMap.size >= FB_MAX_COMMENT_RESULTS) {
+                    break;
+                  }
                 }
 
                 reactionList.splice(
@@ -808,68 +843,147 @@ export class FacebookScraper extends BaseScraper {
                 log.info(
                   `STEP 3: Scrolling (${scrollCount + 1}/${FB_MAX_SCROLL})`,
                 );
+
+                if (commentMap.size >= FB_MAX_COMMENT_RESULTS) {
+                  log.info(
+                    "STEP 3: Hit max comments limit, stop scrolling early",
+                  );
+                  break;
+                }
               }
 
-              log.info("STEP 4: Build entities");
-              const title = await page.title();
-              const feedExists =
+              title = await page.title();
+              feedExists =
                 (await page.locator(FACEBOOK_SELECTORS.feedRoot).count()) > 0;
-              const entities = buildEntities({
-                url: request.loadedUrl ?? targetUrl,
-                title,
-                rawText,
-                profileCandidates: [...profileMap.values()],
-                commentCandidates: [...commentMap.values()],
-                reactionCandidates: reactionList,
+            })();
+
+            try {
+              await Promise.race([
+                scrapePostTask,
+                new Promise<never>((_, rejectRace) => {
+                  timeoutTimer = setTimeout(() => {
+                    rejectRace(
+                      new ScraperError(
+                        "TIMEOUT",
+                        `Deep scrape exceeded ${MAX_POST_TIME_MS}ms for a single post`,
+                      ),
+                    );
+                  }, MAX_POST_TIME_MS);
+                }),
+              ]);
+            } catch (error) {
+              const isTimeout =
+                error instanceof ScraperError && error.reason === "TIMEOUT";
+
+              if (!isTimeout) {
+                throw error;
+              }
+
+              hitTimeLimit = true;
+              logJobEvent("warn", {
+                jobId: input.jobId,
+                platform: "facebook",
+                phase: "extract",
+                step: "deep-scrape-time-limit",
+                message: "Reached time limit per post, return partial data",
+                meta: {
+                  url: request.loadedUrl ?? targetUrl,
+                  maxPostTimeMs: MAX_POST_TIME_MS,
+                  commentsCollected: commentMap.size,
+                  profilesCollected: profileMap.size,
+                  reactionsCollected: reactionList.length,
+                },
+              });
+            } finally {
+              if (timeoutTimer) {
+                clearTimeout(timeoutTimer);
+              }
+            }
+
+            if (title === "Facebook") {
+              title = await page.title().catch(() => "Facebook");
+            }
+
+            if (!feedExists) {
+              const feedCount = await page
+                .locator(FACEBOOK_SELECTORS.feedRoot)
+                .count()
+                .catch(() => 0);
+              feedExists = feedCount > 0;
+            }
+
+            if (!rawText) {
+              rawText = await page
+                .locator(FACEBOOK_SELECTORS.fallbackBody)
+                .innerText()
+                .catch(() => "");
+            }
+
+            const entities = buildEntities({
+              url: request.loadedUrl ?? targetUrl,
+              title,
+              rawText,
+              profileCandidates: [...profileMap.values()],
+              commentCandidates: [...commentMap.values()].slice(
+                0,
+                FB_MAX_COMMENT_RESULTS,
+              ),
+              reactionCandidates: reactionList,
+            });
+
+            if (input.debugMode) {
+              log.info("STEP 5: Save raw extract");
+              const rawExtractPath = await saveRawExtract({
+                jobId: input.jobId,
+                label: "facebook-body",
+                payload: {
+                  url: request.loadedUrl ?? targetUrl,
+                  title,
+                  feedExists,
+                  rawText,
+                  scrollLoops: FB_MAX_SCROLL,
+                  maxComments: FB_MAX_COMMENT_RESULTS,
+                  maxPostTimeMs: MAX_POST_TIME_MS,
+                  timedOut: hitTimeLimit,
+                  fastLocalMode: FAST_LOCAL_MODE,
+                },
               });
 
-              if (input.debugMode) {
-                log.info("STEP 5: Save raw extract");
-                const rawExtractPath = await saveRawExtract({
-                  jobId: input.jobId,
-                  label: "facebook-body",
-                  payload: {
-                    url: request.loadedUrl ?? targetUrl,
-                    title,
-                    feedExists,
-                    rawText,
-                    scrollLoops: FB_MAX_SCROLL,
-                    fastLocalMode: FAST_LOCAL_MODE,
-                  },
-                });
+              logJobEvent("info", {
+                jobId: input.jobId,
+                platform: "facebook",
+                phase: "observe",
+                step: "raw-extract",
+                message: "Saved raw extract snapshot",
+                meta: { rawExtractPath },
+              });
+            }
 
-                logJobEvent("info", {
-                  jobId: input.jobId,
-                  platform: "facebook",
-                  phase: "observe",
-                  step: "raw-extract",
-                  message: "Saved raw extract snapshot",
-                  meta: { rawExtractPath },
-                });
-              }
+            if (prisma && account) {
+              await prisma.account.update({
+                where: { id: account.id },
+                data: { lastUsedAt: new Date() },
+              });
+            }
 
-              if (prisma && account) {
-                await prisma.account.update({
-                  where: { id: account.id },
-                  data: { lastUsedAt: new Date() },
-                });
-              }
+            await reportProgress(
+              69,
+              hitTimeLimit
+                ? "step-ready-to-persist-partial"
+                : "step-ready-to-persist",
+            );
 
-              await reportProgress(69, "step-ready-to-persist");
-
-              return {
-                url: request.loadedUrl ?? targetUrl,
-                title: feedExists ? `[Feed] ${title}` : title,
-                previewSnippet: scraper.createPreview(rawText),
-                crawledAt: new Date().toISOString(),
-                entities,
-              };
-            })(),
-            FB_GLOBAL_TIMEOUT_MS,
-            "Scrape timeout",
-          );
-
-          resolve(output);
+            resolve({
+              url: request.loadedUrl ?? targetUrl,
+              title: feedExists ? `[Feed] ${title}` : title,
+              previewSnippet: scraper.createPreview(rawText),
+              crawledAt: new Date().toISOString(),
+              entities,
+            });
+          } catch (error) {
+            await closeBrowserSafely(page);
+            throw error;
+          }
         },
       });
 

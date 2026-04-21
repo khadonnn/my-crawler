@@ -30,6 +30,8 @@ type AddScrapeJobOptions = {
   debugMode?: boolean;
   clientJobId?: string;
   proxyRegion?: ProxyRegion;
+  selectedProxyId?: string;
+  targetCountry?: string;
   platform?: Platform;
   mode?: CrawlMode;
   keyword?: string;
@@ -64,6 +66,7 @@ type ProxyRow = {
   username: string | null;
   password: string | null;
   protocol: string;
+  countryCode: string;
   region: ProxyRegion;
   status: string;
   latency: number;
@@ -75,6 +78,36 @@ function normalizeProxyRegion(value: unknown): ProxyRegion {
   }
 
   return "ANY";
+}
+
+function normalizeCountryCode(value: unknown): string {
+  if (typeof value !== "string") {
+    return "AUTO";
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return normalized.length > 0 ? normalized : "AUTO";
+}
+
+function pickRandomProxy<T>(items: T[]): T | null {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return items[Math.floor(Math.random() * items.length)] ?? null;
+}
+
+function toSelectedProxyConfig(proxy: ProxyRow): SelectedProxyConfig {
+  return {
+    id: proxy.id,
+    ip: proxy.address,
+    address: proxy.address,
+    port: proxy.port,
+    countryCode: proxy.countryCode,
+    region: normalizeProxyRegion(proxy.region),
+    protocol: proxy.protocol,
+    url: buildProxyUrl(proxy),
+  };
 }
 
 function buildProxyUrl(proxy: ProxyRow): string {
@@ -155,14 +188,163 @@ async function selectProxyForRegion(params: {
     return null;
   }
 
-  return {
-    id: selected.id,
-    address: selected.address,
-    port: selected.port,
-    region: normalizeProxyRegion(selected.region),
-    protocol: selected.protocol,
-    url: buildProxyUrl(selected),
-  };
+  return toSelectedProxyConfig(selected as ProxyRow);
+}
+
+async function selectProxyById(params: {
+  prisma: ReturnType<typeof getPrisma>;
+  proxyId: string;
+}): Promise<SelectedProxyConfig | null> {
+  const { prisma, proxyId } = params;
+  if (!proxyId) {
+    return null;
+  }
+
+  const selected = await prisma.proxy.findUnique({
+    where: { id: proxyId },
+    select: {
+      id: true,
+      address: true,
+      port: true,
+      username: true,
+      password: true,
+      protocol: true,
+      countryCode: true,
+      region: true,
+      status: true,
+      latency: true,
+    },
+  });
+
+  if (!selected || selected.status !== "WORKING") {
+    return null;
+  }
+
+  return toSelectedProxyConfig(selected as ProxyRow);
+}
+
+async function selectWorkingProxyByCountry(params: {
+  prisma: ReturnType<typeof getPrisma>;
+  countryCode: string;
+}): Promise<SelectedProxyConfig | null> {
+  const { prisma, countryCode } = params;
+
+  const candidates = await prisma.proxy.findMany({
+    where: {
+      status: "WORKING",
+      countryCode,
+    },
+    select: {
+      id: true,
+      address: true,
+      port: true,
+      username: true,
+      password: true,
+      protocol: true,
+      countryCode: true,
+      region: true,
+      status: true,
+      latency: true,
+    },
+  });
+
+  const selected = pickRandomProxy(candidates as ProxyRow[]);
+  return selected ? toSelectedProxyConfig(selected) : null;
+}
+
+async function selectRandomWorkingProxy(params: {
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<SelectedProxyConfig | null> {
+  const { prisma } = params;
+
+  const candidates = await prisma.proxy.findMany({
+    where: { status: "WORKING" },
+    select: {
+      id: true,
+      address: true,
+      port: true,
+      username: true,
+      password: true,
+      protocol: true,
+      countryCode: true,
+      region: true,
+      status: true,
+      latency: true,
+    },
+  });
+
+  const selected = pickRandomProxy(candidates as ProxyRow[]);
+  return selected ? toSelectedProxyConfig(selected) : null;
+}
+
+async function getAllWorkingProxies(params: {
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<ProxyRow[]> {
+  const { prisma } = params;
+
+  const proxies = await prisma.proxy.findMany({
+    where: {
+      status: "WORKING",
+    },
+    select: {
+      id: true,
+      address: true,
+      port: true,
+      username: true,
+      password: true,
+      protocol: true,
+      countryCode: true,
+      region: true,
+      status: true,
+      latency: true,
+    },
+  });
+
+  return proxies as ProxyRow[];
+}
+
+async function allocateProxyOrThrow(params: {
+  prisma: ReturnType<typeof getPrisma>;
+  selectedProxyId?: string;
+  effectiveTargetCountry: string;
+}): Promise<SelectedProxyConfig> {
+  const { prisma, selectedProxyId, effectiveTargetCountry } = params;
+
+  const proxies = await getAllWorkingProxies({ prisma });
+  if (!proxies || proxies.length === 0) {
+    throw new ScraperError("NO_PROXY_IN_POOL", "No working proxies available");
+  }
+
+  if (selectedProxyId) {
+    const selectedById = await selectProxyById({
+      prisma,
+      proxyId: selectedProxyId,
+    });
+
+    if (!selectedById) {
+      throw new ScraperError("NO_PROXY_AVAILABLE", "Proxy allocation failed");
+    }
+
+    return selectedById;
+  }
+
+  if (effectiveTargetCountry !== "AUTO") {
+    const selectedByCountry = await selectWorkingProxyByCountry({
+      prisma,
+      countryCode: effectiveTargetCountry,
+    });
+
+    if (selectedByCountry) {
+      return selectedByCountry;
+    }
+  }
+
+  const selected = pickRandomProxy(proxies);
+  if (!selected) {
+    throw new ScraperError("NO_PROXY_AVAILABLE", "Proxy allocation failed");
+  }
+
+  return toSelectedProxyConfig(selected);
 }
 
 function detectBlockedReason(errorMessage: string): BlockedReason {
@@ -214,7 +396,11 @@ function resolveBlockedReason(error: unknown): BlockedReason {
 }
 
 function isAutoRetryableReason(reason: BlockedReason): boolean {
-  return reason === "TIMEOUT" || reason === "NETWORK_ERROR";
+  return (
+    reason === "TIMEOUT" ||
+    reason === "NETWORK_ERROR" ||
+    reason === "IP_VERIFICATION_FAILED"
+  );
 }
 
 function computeRetryDelayMs(retryCount: number): number {
@@ -257,6 +443,7 @@ async function persistScrapedEntities(params: {
   const posts = entities.posts ?? [];
   const profiles = entities.profiles ?? [];
   const interactions = entities.interactions ?? [];
+  const postIdByFbPostId = new Map<string, string>();
 
   if (posts.length === 0) {
     return;
@@ -282,6 +469,15 @@ async function persistScrapedEntities(params: {
         keywordMatched: post.keywordMatched ?? null,
       },
     });
+
+    const persistedPost = await prisma.post.findUnique({
+      where: { fbPostId: post.fbPostId },
+      select: { id: true },
+    });
+
+    if (persistedPost) {
+      postIdByFbPostId.set(post.fbPostId, persistedPost.id);
+    }
   }
 
   for (const profile of profiles) {
@@ -301,16 +497,6 @@ async function persistScrapedEntities(params: {
     });
   }
 
-  const firstPost = posts[0];
-  const dbPost = await prisma.post.findUnique({
-    where: { fbPostId: firstPost.fbPostId },
-    select: { id: true },
-  });
-
-  if (!dbPost) {
-    return;
-  }
-
   for (const interaction of interactions) {
     const dbProfile = await prisma.profile.findUnique({
       where: { fbUid: interaction.profileFbUid },
@@ -318,6 +504,15 @@ async function persistScrapedEntities(params: {
     });
 
     if (!dbProfile) {
+      continue;
+    }
+
+    const dbPostId =
+      (interaction.fbPostId
+        ? postIdByFbPostId.get(interaction.fbPostId)
+        : undefined) ?? postIdByFbPostId.values().next().value;
+
+    if (!dbPostId) {
       continue;
     }
 
@@ -330,7 +525,7 @@ async function persistScrapedEntities(params: {
         where: { fbCommentId: interaction.fbCommentId },
         update: {
           jobId: clientJobId,
-          postId: dbPost.id,
+          postId: dbPostId,
           profileId: dbProfile.id,
           type: "COMMENT",
           commentText: interaction.commentText ?? null,
@@ -341,7 +536,7 @@ async function persistScrapedEntities(params: {
         },
         create: {
           jobId: clientJobId,
-          postId: dbPost.id,
+          postId: dbPostId,
           profileId: dbProfile.id,
           type: "COMMENT",
           fbCommentId: interaction.fbCommentId,
@@ -360,7 +555,7 @@ async function persistScrapedEntities(params: {
       where: {
         unique_reaction: {
           profileId: dbProfile.id,
-          postId: dbPost.id,
+          postId: dbPostId,
           type: "REACTION",
         },
       },
@@ -373,7 +568,7 @@ async function persistScrapedEntities(params: {
       },
       create: {
         jobId: clientJobId,
-        postId: dbPost.id,
+        postId: dbPostId,
         profileId: dbProfile.id,
         type: "REACTION",
         reactionType: interaction.reactionType ?? null,
@@ -633,6 +828,14 @@ class ScraperService {
       const mode = normalizeCrawlMode(options?.mode);
       const keyword = options?.keyword?.trim() || undefined;
       const preLocked = options?.preLocked === true;
+      const selectedProxyId = options?.selectedProxyId?.trim() || undefined;
+      const targetCountry = normalizeCountryCode(options?.targetCountry);
+      const effectiveTargetCountry =
+        targetCountry !== "AUTO"
+          ? targetCountry
+          : requestedProxyRegion === "VN" || requestedProxyRegion === "US"
+            ? requestedProxyRegion
+            : "AUTO";
 
       if (prisma && options?.clientJobId && !preLocked) {
         const lockResult = await prisma.job.updateMany({
@@ -656,14 +859,34 @@ class ScraperService {
         }
       }
 
-      const selectedProxy = prisma
-        ? await selectProxyForRegion({
-            prisma,
-            proxyRegion: requestedProxyRegion,
-          })
-        : null;
+      if (!prisma) {
+        throw new ScraperError(
+          "UNKNOWN",
+          "Cannot execute job without a client job ID (prisma context required)",
+        );
+      }
 
-      if (prisma && options?.clientJobId) {
+      const selectedProxy = await allocateProxyOrThrow({
+        prisma,
+        selectedProxyId,
+        effectiveTargetCountry,
+      });
+
+      logJobEvent("info", {
+        jobId,
+        platform: "generic",
+        phase: "proxy",
+        step: "proxy-assigned",
+        message: "Proxy assigned for job execution",
+        meta: {
+          proxyId: selectedProxy.id,
+          proxyIp: selectedProxy.ip,
+          proxyPort: selectedProxy.port,
+          countryCode: selectedProxy.countryCode,
+        },
+      });
+
+      if (options?.clientJobId) {
         const startResult = await prisma.job.updateMany({
           where: {
             id: options.clientJobId,
@@ -681,11 +904,11 @@ class ScraperService {
             platform,
             mode,
             requestedProxyRegion,
-            usedProxyId: selectedProxy?.id ?? null,
-            usedProxyAddress: selectedProxy?.address ?? null,
-            usedProxyPort: selectedProxy?.port ?? null,
-            usedProxyRegion: selectedProxy?.region ?? null,
-            progress: 5,
+            usedProxyId: selectedProxy.id,
+            usedProxyAddress: selectedProxy.address,
+            usedProxyPort: selectedProxy.port,
+            usedProxyRegion: selectedProxy.region,
+            progress: mode === "SEARCH_KEYWORD" ? 0 : 5,
             debugMode,
           },
         });
@@ -699,7 +922,7 @@ class ScraperService {
       }
 
       let heartbeatProgress = 10;
-      if (prisma && options?.clientJobId) {
+      if (prisma && options?.clientJobId && mode !== "SEARCH_KEYWORD") {
         const heartbeat = setInterval(() => {
           if (heartbeatProgress < 45) {
             heartbeatProgress += 5;
@@ -733,14 +956,12 @@ class ScraperService {
           keyword,
           debugMode,
           requestedProxyRegion,
-          usedProxy: selectedProxy
-            ? {
-                id: selectedProxy.id,
-                address: selectedProxy.address,
-                port: selectedProxy.port,
-                region: selectedProxy.region,
-              }
-            : null,
+          usedProxy: {
+            id: selectedProxy.id,
+            address: selectedProxy.address,
+            port: selectedProxy.port,
+            region: selectedProxy.region,
+          },
         },
       });
 
@@ -766,37 +987,152 @@ class ScraperService {
         (platform === "GOOGLE"
           ? "https://www.google.com"
           : "https://www.facebook.com");
+      let searchStartIndex = 0;
 
-      const extracted = await scraper.execute({
-        jobId,
-        platform,
-        mode,
-        url: seedUrl,
-        keyword,
-        debugMode,
-        proxy: selectedProxy ?? undefined,
-        onProgress: async (progress, step) => {
-          await progressUpdater.updateProgress(progress);
+      if (prisma && options?.clientJobId && mode === "SEARCH_KEYWORD") {
+        const existingJob = await prisma.job.findUnique({
+          where: { id: options.clientJobId },
+          select: { searchProgressIndex: true },
+        });
 
-          if (step) {
+        searchStartIndex = Math.max(0, existingJob?.searchProgressIndex ?? 0);
+      }
+
+      let searchPartialPersistCount = 0;
+      let searchPartialFailCount = 0;
+      const partialTotalRef = { value: 0 };
+
+      const extracted = await scraper.execute(
+        {
+          jobId,
+          platform,
+          mode,
+          url: seedUrl,
+          keyword,
+          searchStartIndex,
+          debugMode,
+          proxy: selectedProxy,
+          onProgress: async (progress, step) => {
+            if (mode === "SEARCH_KEYWORD") {
+              if (step === "search-phase-complete") {
+                await progressUpdater.updateProgress(20);
+                logJobEvent("info", {
+                  jobId,
+                  platform: scraper.platform,
+                  phase: "progress",
+                  step: "search-complete",
+                  message: "Search phase completed",
+                  meta: { progress: 20 },
+                });
+              }
+
+              return;
+            }
+
+            await progressUpdater.updateProgress(progress);
+
+            if (step) {
+              logJobEvent("info", {
+                jobId,
+                platform: scraper.platform,
+                phase: "scrape",
+                step,
+                message: "Progress heartbeat from scraper loop",
+                meta: { progress },
+              });
+            }
+          },
+        },
+        {
+          onPartialResult: async (result, meta) => {
+            if (mode !== "SEARCH_KEYWORD") {
+              return;
+            }
+
+            partialTotalRef.value = meta.total;
+
             logJobEvent("info", {
               jobId,
               platform: scraper.platform,
-              phase: "scrape",
-              step,
-              message: "Progress heartbeat from scraper loop",
-              meta: { progress },
+              phase: "search",
+              step: "partial-persist-start",
+              message: "Persisting partial result",
+              meta: {
+                url: meta.url,
+                index: meta.index,
+                total: meta.total,
+              },
             });
-          }
+
+            try {
+              if (prisma && options?.clientJobId) {
+                await persistScrapedEntities({
+                  prisma,
+                  clientJobId: options.clientJobId,
+                  entities: result.entities,
+                });
+              }
+
+              const progress =
+                20 +
+                Math.round(((meta.index + 1) / Math.max(meta.total, 1)) * 60);
+              if (prisma && options?.clientJobId) {
+                await prisma.job.update({
+                  where: { id: options.clientJobId },
+                  data: {
+                    progress,
+                    lastHeartbeatAt: new Date(),
+                    searchProgressIndex: meta.index + 1,
+                  },
+                });
+              }
+
+              searchPartialPersistCount += 1;
+              logJobEvent("info", {
+                jobId,
+                platform: scraper.platform,
+                phase: "search",
+                step: "partial-persist",
+                message: "Partial result persisted",
+                meta: {
+                  url: meta.url,
+                  index: meta.index,
+                  total: meta.total,
+                  progress,
+                },
+              });
+            } catch (error) {
+              searchPartialFailCount += 1;
+              logJobEvent("error", {
+                jobId,
+                platform: scraper.platform,
+                phase: "search",
+                step: "partial-persist-error",
+                message: "Failed to persist partial result",
+                meta: {
+                  url: meta.url,
+                  index: meta.index,
+                  total: meta.total,
+                  error: error instanceof Error ? error.message : "unknown",
+                },
+              });
+
+              throw error;
+            }
+          },
         },
-      });
+      );
 
       if (stopProgressHeartbeat) {
         stopProgressHeartbeat();
         stopProgressHeartbeat = null;
       }
 
-      await progressUpdater.updateProgress(70);
+      if (mode === "SEARCH_KEYWORD") {
+        await progressUpdater.updateProgress(80);
+      } else {
+        await progressUpdater.updateProgress(70);
+      }
 
       // Push data to the job's isolated Dataset
       await jobDataset.pushData({
@@ -821,13 +1157,16 @@ class ScraperService {
         const clientJobId = options.clientJobId;
         const artifacts = await collectArtifactPaths(jobId);
 
-        await progressUpdater.updateProgress(90);
-
-        await persistScrapedEntities({
-          prisma,
-          clientJobId,
-          entities: extracted.entities,
-        });
+        if (mode === "SEARCH_KEYWORD") {
+          await progressUpdater.updateProgress(90);
+        } else {
+          await progressUpdater.updateProgress(90);
+          await persistScrapedEntities({
+            prisma,
+            clientJobId,
+            entities: extracted.entities,
+          });
+        }
 
         const [profileCount, interactionCount] = await Promise.all([
           prisma.profile.count({ where: { jobId: clientJobId } }),
@@ -852,6 +1191,8 @@ class ScraperService {
             lockedAt: null,
             retryScheduledFor: null,
             lastHeartbeatAt: new Date(),
+            searchProgressIndex:
+              extracted.summary?.totalDiscovered ?? partialTotalRef.value,
           },
         });
 
@@ -882,7 +1223,13 @@ class ScraperService {
         phase: "job",
         step: "complete",
         message: "Job completed",
-        meta: { items: datasetResults.items.length },
+        meta: {
+          items: datasetResults.items.length,
+          partialPersisted: searchPartialPersistCount,
+          partialPersistFailed: searchPartialFailCount,
+          partialTotal: partialTotalRef.value,
+          summary: extracted.summary ?? null,
+        },
       });
 
       // Clean up disk: remove dataset file after retrieving data

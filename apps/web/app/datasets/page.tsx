@@ -436,9 +436,11 @@ export default function DatasetsPage() {
               <p className="text-xs text-sky-700">{estimatedRemainingText}</p>
             ) : null}
           </div>
-          <div className="rounded-md border border-sky-500/20 bg-white/50 p-2">
-            <p className="text-xs font-medium text-sky-800">Job timeline</p>
-            <ul className="mt-1 space-y-1 text-xs text-sky-700">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+            <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+              Job timeline
+            </p>
+            <ul className="mt-2 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
               <li>Created: {formatTimelineTime(selectedJob.createdAt)}</li>
               <li>Started: {formatTimelineTime(selectedJob.startedAt)}</li>
               <li>
@@ -452,9 +454,11 @@ export default function DatasetsPage() {
                 {formatTimelineTime(selectedJob.retryScheduledFor)}
               </li>
               <li>Lock acquired: {formatTimelineTime(selectedJob.lockedAt)}</li>
-              {selectedJob.status === "FAILED" ? (
-                <li>Error detail: {selectedJob.errorDetail ?? "N/A"}</li>
-              ) : null}
+              {selectedJob.status === "FAILED" && (
+                <li className="font-medium text-red-600 dark:text-red-400">
+                  Error detail: {selectedJob.errorDetail ?? "N/A"}
+                </li>
+              )}
             </ul>
           </div>
         </div>

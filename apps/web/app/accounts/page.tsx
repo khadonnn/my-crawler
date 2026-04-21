@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CookieImportModal } from "@/components/crawlers/cookie-import-modal";
@@ -139,6 +141,27 @@ export default function AccountsPage() {
           Quản lý cookie session để crawler có thể chạy với tài khoản đã đăng
           nhập.
         </p>
+        <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-4 mt-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium">
+                Bước 3/5: Cấp quyền truy cập
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Cấp quyền cho tài khoản để crawler có thể hoạt động ổn định và
+                tránh bị giới hạn.
+              </p>
+            </div>
+
+            <Button asChild size="sm" variant={hasData ? "default" : "outline"}>
+              <Link href="/crawlers/new">
+                {hasData
+                  ? "Đi tới bước Tạo crawler"
+                  : "Tạo crawler (sau khi import account)"}
+              </Link>
+            </Button>
+          </div>
+        </div>
       </div>
       <Card>
         <CardHeader className="flex-row items-center justify-between ">

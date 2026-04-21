@@ -6,16 +6,27 @@ import { scraperService } from "../services/scraper.service.js";
  * Validates the URL and initiates a scrape job
  */
 export async function handleScrape(req: Request, res: Response): Promise<void> {
-  const { url, keyword, platform, mode, debugMode, clientJobId, proxyRegion } =
-    req.body as {
-      url?: string;
-      keyword?: string;
-      platform?: "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
-      mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
-      debugMode?: boolean;
-      clientJobId?: string;
-      proxyRegion?: "ANY" | "VN" | "US";
-    };
+  const {
+    url,
+    keyword,
+    platform,
+    mode,
+    debugMode,
+    clientJobId,
+    proxyRegion,
+    selectedProxyId,
+    targetCountry,
+  } = req.body as {
+    url?: string;
+    keyword?: string;
+    platform?: "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
+    mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
+    debugMode?: boolean;
+    clientJobId?: string;
+    proxyRegion?: "ANY" | "VN" | "US";
+    selectedProxyId?: string;
+    targetCountry?: string;
+  };
 
   if (mode === "DIRECT_URL" && (!url || !/^https?:\/\//.test(url))) {
     res.status(400).json({ error: "DIRECT_URL requires a valid URL" });
@@ -41,6 +52,8 @@ export async function handleScrape(req: Request, res: Response): Promise<void> {
       debugMode,
       clientJobId,
       proxyRegion,
+      selectedProxyId,
+      targetCountry,
     });
 
     res.status(202).json({

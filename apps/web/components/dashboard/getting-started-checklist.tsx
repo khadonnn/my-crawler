@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   CircleDashed,
   Database,
-  Home,
   Shield,
   ShieldCheck,
   Sparkles,
@@ -72,14 +71,6 @@ export default async function GettingStartedChecklist() {
 
   const steps: ChecklistStep[] = [
     {
-      title: "Trang chủ",
-      description:
-        "Bắt đầu từ dashboard trung tâm để theo dõi toàn bộ luồng scraping.",
-      href: "/",
-      icon: Home,
-      done: true,
-    },
-    {
       title: "Cấu hình proxy",
       description:
         "Thêm proxy trước khi crawl để tránh dùng trực tiếp IP thật.",
@@ -126,9 +117,8 @@ export default async function GettingStartedChecklist() {
             </div>
             <CardTitle className="text-xl">Checklist bắt đầu</CardTitle>
             <CardDescription className="max-w-2xl text-sm leading-6">
-              Làm theo 5 bước này để đi từ trang chủ, qua proxy, rồi tới cấu
-              hình truy cập, chạy crawler và xem dữ liệu thật một cách an toàn
-              hơn.
+              Làm theo 4 bước này để cấu hình proxy, thiết lập truy cập, chạy
+              crawler và xem dữ liệu thật một cách an toàn hơn.
             </CardDescription>
             {!hasDatabaseUrl ? (
               <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
@@ -150,7 +140,7 @@ export default async function GettingStartedChecklist() {
                   Hoàn thành
                 </p>
                 <p className="mt-1 text-2xl font-semibold">
-                  {completedSteps}/5
+                  {completedSteps}/{steps.length}
                 </p>
               </div>
               <div className="rounded-full bg-primary/10 p-2 text-primary">

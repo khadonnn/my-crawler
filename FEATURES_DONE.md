@@ -1,5 +1,103 @@
 # FEATURES DONE
 
+## Proxy Selection In Create Job + GeoIP Runtime Fix
+
+- Fixed GeoIP runtime dependency placement for web API routes:
+  - Installed `geoip-lite` in `apps/web` so `/api/proxies` and `/api/proxies/bulk-import` can actually detect region at runtime.
+  - Installed `@types/geoip-lite` in `apps/web` for TS typing.
+- Added ability to select a specific imported proxy directly in create-job form:
+  - `apps/web/components/crawlers/new-crawler-form.tsx` now has `Proxy Cu The (optional)` dropdown populated from WORKING proxies.
+  - If selected, form sends `selectedProxyId` in create job payload.
+- Wired `selectedProxyId` end-to-end:
+  - Web API: `apps/web/app/api/jobs/route.ts`, `apps/web/app/api/jobs/create/route.ts`.
+  - Orchestration layer: `apps/web/lib/server/jobs.ts`.
+  - Worker API/controller: `apps/crawler/src/controllers/scraper.controller.ts`.
+  - Worker runtime selection: `apps/crawler/src/services/scraper.service.ts`.
+- Worker behavior update:
+  - Prefer selected proxy by id when provided.
+  - Fallback to region-based proxy selection when selected id is missing/invalid.
+- Validation completed:
+  - `npm --workspace @scraping-platform/web run build`
+  - `npm --workspace @scraping-platform/crawler run build`
+  - Both builds passed.
+
+## Proxy GeoIP Region Auto-Detect + Dynamic Region Selector
+
+- Added automatic region detection for proxy import/create when `region` is omitted:
+  - `apps/web/app/api/proxies/route.ts`
+  - `apps/web/app/api/proxies/bulk-import/route.ts`
+- Region detection logic:
+  - Uses `geoip-lite` lookup for IP addresses.
+  - Maps `country=VN -> VN`, `country=US -> US`, otherwise `ANY`.
+  - Keeps explicit user-provided region unchanged.
+  - Falls back to `ANY` gracefully if GeoIP database is unavailable.
+- Updated crawler create-job form to derive Proxy Region options from imported proxy data (instead of static-only list):
+  - `apps/web/components/crawlers/new-crawler-form.tsx`
+  - Always includes `ANY`, plus detected/imported regions.
+  - Keeps current selected region valid when proxy inventory changes.
+- Updated proxy import dialog helper text to mention auto-detect behavior when region is not provided:
+  - `apps/web/components/proxies/import-proxy-dialog.tsx`
+- Validation completed:
+  - `npx turbo build --filter=@scraping-platform/web` passed.
+
+## Final Optimization Package (UI + Incremental Persist + Progress Phases)
+
+- Refactored crawler strategy contract to support partial result emission via `ScrapeOptions.onPartialResult` while keeping `execute()` return contract backward compatible.
+- Updated Facebook search strategy to emit per-URL partial results and summary output without in-strategy persistence or full in-memory merge.
+- Implemented service-level incremental persistence for search mode:
+  - Persist per URL immediately when partial result arrives.
+  - Structured logs for partial persist start/success/failure.
+  - Resilient behavior so persisted chunks survive mid-run failures.
+- Implemented phased progress semantics for search mode:
+  - Search phase: `0 -> 20`
+  - URL crawl phase: `20 -> 80`
+  - Finalize phase: `80 -> 100`
+- Added robust checkpointing for search resume via `Job.searchProgressIndex`:
+  - Persist checkpoint (`index + 1`) after each successful partial persist.
+  - Resume SEARCH_KEYWORD crawl from checkpoint index after retry/restart.
+  - Avoid re-crawling already persisted URLs.
+- Polished create-job UI with conditional rendering by mode (unmounting inactive field):
+  - DIRECT mode renders URL input only.
+  - SEARCH mode renders Keyword input only.
+  - Submit payload contains only mode-appropriate field and strategy mapping.
+- Validation completed:
+  - `npm --workspace @scraping-platform/web run build`
+  - `npm --workspace @scraping-platform/crawler run build`
+  - Both builds passed.
+
+## Crawlers Console Mode UX (Package 3)
+
+- Updated create-job form UI to support explicit mode switch:
+  - DIRECT_URL (URL Truc tiep)
+  - SEARCH_KEYWORD (Tim theo tu khoa)
+- Added dynamic input behavior in `apps/web/components/crawlers/new-crawler-form.tsx`:
+  - DIRECT mode enables URL input and disables Keyword input.
+  - SEARCH mode enables Keyword input and disables URL input.
+- Updated submit payload to include strategy with matching mode:
+  - `FACEBOOK_DIRECT` -> `DIRECT_URL`
+  - `FACEBOOK_SEARCH` -> `SEARCH_KEYWORD`
+- Updated jobs API parser in `apps/web/app/api/jobs/route.ts` to accept `strategy` and map to `platform/mode` safely.
+- Verified web build success after changes.
+
+## Deep Scrape Safety Discipline (Package 2)
+
+- Enforced hard deep-scrape limits in `apps/crawler/src/scrapers/facebook/facebook.scraper.ts`:
+  - `MAX_SCROLL = 3`
+  - `MAX_COMMENTS = 15`
+  - `MAX_POST_TIME_MS = 30000` (30s per post)
+- Added comment-loop guard to stop collecting once comment limit is reached.
+- Wrapped per-post deep scrape execution with `Promise.race()` time-limit handling.
+- Timeout now returns partial entities safely (skip/fallback behavior) instead of killing the whole job pipeline.
+- Preserved already collected profiles/comments/reactions when stopping early due to limit or timeout.
+
+## Facebook Keyword Search - Inline Sequential Crawl
+
+- Implemented URL-based Facebook posts search in `apps/crawler/src/scrapers/facebook/facebook-search.scraper.ts`.
+- Collected and normalized up to 5 search result post URLs after a bounded scroll pass.
+- Reused the existing Facebook direct crawler sequentially for each result URL inside the same SEARCH_KEYWORD job.
+- Kept the job output and DB persistence in a single pipeline by merging extracted posts, profiles, and interactions before the existing service persistence step.
+- Added `fbPostId` linkage to interaction payloads so merged multi-post jobs persist comment/reaction rows against the correct post.
+
 ## Production Hardening Finalization (Durable Retry + Manual Retry + Timeline)
 
 - Reworked retry execution in worker runtime (`apps/crawler/src/services/scraper.service.ts`):
