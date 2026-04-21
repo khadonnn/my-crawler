@@ -18,19 +18,38 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       url?: string;
       keyword?: string;
+      platform?: "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
+      mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
       scrapeMode?: "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST";
       proxyRegion?: "ANY" | "VN" | "US";
       schedule?: string;
       debugMode?: boolean;
     };
 
-    if (!body.url) {
-      return NextResponse.json({ error: "URL khong hop le" }, { status: 400 });
+    const platform = body.platform ?? "FACEBOOK";
+    const mode = body.mode ?? "DIRECT_URL";
+    const url = body.url?.trim();
+    const keyword = body.keyword?.trim();
+
+    if (mode === "DIRECT_URL" && (!url || !/^https?:\/\//.test(url))) {
+      return NextResponse.json(
+        { error: "DIRECT_URL requires valid url" },
+        { status: 400 },
+      );
+    }
+
+    if (mode === "SEARCH_KEYWORD" && !keyword) {
+      return NextResponse.json(
+        { error: "SEARCH_KEYWORD requires keyword" },
+        { status: 400 },
+      );
     }
 
     const created = await createCrawlerJob({
-      url: body.url,
-      keyword: body.keyword,
+      url,
+      keyword,
+      platform,
+      mode,
       scrapeMode: body.scrapeMode,
       proxyRegion: body.proxyRegion,
       schedule: body.schedule,

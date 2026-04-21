@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   CircleDashed,
   Database,
+  Home,
+  Shield,
   ShieldCheck,
   Sparkles,
   Play,
@@ -35,6 +37,7 @@ export default async function GettingStartedChecklist() {
   const hasDatabaseUrl = Boolean(process.env.DATABASE_URL);
 
   let activeAccountCount = 0;
+  let workingProxyCount = 0;
   let jobCount = 0;
   let completedJobCount = 0;
   let interactionCount = 0;
@@ -52,16 +55,38 @@ export default async function GettingStartedChecklist() {
       }
     };
 
-    [activeAccountCount, jobCount, completedJobCount, interactionCount] =
-      await Promise.all([
-        safeCount(prisma.account.count({ where: { status: "ACTIVE" } })),
-        safeCount(prisma.job.count()),
-        safeCount(prisma.job.count({ where: { status: "COMPLETED" } })),
-        safeCount(prisma.interaction.count()),
-      ]);
+    [
+      activeAccountCount,
+      workingProxyCount,
+      jobCount,
+      completedJobCount,
+      interactionCount,
+    ] = await Promise.all([
+      safeCount(prisma.account.count({ where: { status: "ACTIVE" } })),
+      safeCount(prisma.proxy.count({ where: { status: "WORKING" } })),
+      safeCount(prisma.job.count()),
+      safeCount(prisma.job.count({ where: { status: "COMPLETED" } })),
+      safeCount(prisma.interaction.count()),
+    ]);
   }
 
   const steps: ChecklistStep[] = [
+    {
+      title: "Trang chủ",
+      description:
+        "Bắt đầu từ dashboard trung tâm để theo dõi toàn bộ luồng scraping.",
+      href: "/",
+      icon: Home,
+      done: true,
+    },
+    {
+      title: "Cấu hình proxy",
+      description:
+        "Thêm proxy trước khi crawl để tránh dùng trực tiếp IP thật.",
+      href: "/proxies",
+      icon: Shield,
+      done: workingProxyCount > 0,
+    },
     {
       title: "Cấp quyền truy cập",
       description:
@@ -71,19 +96,11 @@ export default async function GettingStartedChecklist() {
       done: activeAccountCount > 0,
     },
     {
-      title: "Tạo crawler",
-      description:
-        "Chọn URL, keyword và phạm vi crawl để khởi động một job mới.",
-      href: "/crawlers/new",
+      title: "Crawlers",
+      description: "Chọn URL, keyword và phạm vi crawl, rồi khởi động job mới.",
+      href: "/crawlers",
       icon: Target,
       done: jobCount > 0,
-    },
-    {
-      title: "Chạy thu thập dữ liệu",
-      description: "Kích hoạt một job mới và đợi đến khi crawler hoàn thành.",
-      href: "/crawlers",
-      icon: Play,
-      done: completedJobCount > 0,
     },
     {
       title: "Xem dữ liệu",
@@ -109,8 +126,9 @@ export default async function GettingStartedChecklist() {
             </div>
             <CardTitle className="text-xl">Checklist bắt đầu</CardTitle>
             <CardDescription className="max-w-2xl text-sm leading-6">
-              Làm theo 4 bước này để đi từ trạng thái chưa biết bắt đầu ở đâu
-              sang một flow scraping rõ ràng, có trạng thái và có dữ liệu thật.
+              Làm theo 5 bước này để đi từ trang chủ, qua proxy, rồi tới cấu
+              hình truy cập, chạy crawler và xem dữ liệu thật một cách an toàn
+              hơn.
             </CardDescription>
             {!hasDatabaseUrl ? (
               <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
@@ -132,7 +150,7 @@ export default async function GettingStartedChecklist() {
                   Hoàn thành
                 </p>
                 <p className="mt-1 text-2xl font-semibold">
-                  {completedSteps}/4
+                  {completedSteps}/5
                 </p>
               </div>
               <div className="rounded-full bg-primary/10 p-2 text-primary">

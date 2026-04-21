@@ -4,11 +4,18 @@ import path from "node:path";
 import { getPrisma } from "@scraping-platform/db";
 import { Dataset } from "crawlee";
 import type {
+  CrawlMode,
+  Platform,
   ProxyRegion,
   ScrapedEntities,
   SelectedProxyConfig,
 } from "../scrapers/base/scraper.types.js";
-import { createScraperForUrl } from "../scrapers/factory/scraper.factory.js";
+import {
+  ScraperError,
+  isBlockedReason,
+  type BlockedReason,
+} from "../errors/scraper.error.js";
+import { createScraperStrategy } from "../scrapers/factory/scraper.factory.js";
 import { cleanupOldArtifacts, logJobEvent } from "../observability/index.js";
 
 export interface ScrapeJob {
@@ -23,7 +30,32 @@ type AddScrapeJobOptions = {
   debugMode?: boolean;
   clientJobId?: string;
   proxyRegion?: ProxyRegion;
+  platform?: Platform;
+  mode?: CrawlMode;
+  keyword?: string;
+  preLocked?: boolean;
 };
+
+function normalizePlatform(value: unknown): Platform {
+  if (
+    value === "FACEBOOK" ||
+    value === "GOOGLE" ||
+    value === "YOUTUBE" ||
+    value === "TIKTOK"
+  ) {
+    return value;
+  }
+
+  return "FACEBOOK";
+}
+
+function normalizeCrawlMode(value: unknown): CrawlMode {
+  if (value === "DIRECT_URL" || value === "SEARCH_KEYWORD") {
+    return value;
+  }
+
+  return "DIRECT_URL";
+}
 
 type ProxyRow = {
   id: string;
@@ -59,12 +91,13 @@ async function selectProxyForRegion(params: {
   proxyRegion: ProxyRegion;
 }): Promise<SelectedProxyConfig | null> {
   const { prisma, proxyRegion } = params;
+  const allowedStatuses = ["WORKING", "UNKNOWN"];
 
   const whereClause =
     proxyRegion === "ANY"
-      ? { status: { in: ["WORKING", "UNKNOWN"] as const } }
+      ? { status: { in: allowedStatuses } }
       : {
-          status: { in: ["WORKING", "UNKNOWN"] as const },
+          status: { in: allowedStatuses },
           region: proxyRegion,
         };
 
@@ -95,7 +128,7 @@ async function selectProxyForRegion(params: {
   if (!selected && proxyRegion !== "ANY") {
     const fallbackCandidates = await prisma.proxy.findMany({
       where: {
-        status: { in: ["WORKING", "UNKNOWN"] as const },
+        status: { in: allowedStatuses },
       },
       orderBy: { latency: "asc" },
       take: 30,
@@ -132,17 +165,60 @@ async function selectProxyForRegion(params: {
   };
 }
 
-function detectBlockedReason(errorMessage: string): string | null {
+function detectBlockedReason(errorMessage: string): BlockedReason {
   const normalized = errorMessage.toLowerCase();
+
+  if (
+    normalized.includes("network") ||
+    normalized.includes("enotfound") ||
+    normalized.includes("econnreset") ||
+    normalized.includes("etimedout")
+  ) {
+    return "NETWORK_ERROR";
+  }
+
+  if (normalized.includes("timeout") || normalized.includes("timed out")) {
+    return "TIMEOUT";
+  }
+
   if (normalized.includes("captcha")) {
-    return "CAPTCHA_WALL";
+    return "CAPTCHA";
   }
 
   if (normalized.includes("login") || normalized.includes("sign in")) {
     return "LOGIN_WALL";
   }
 
-  return null;
+  return "UNKNOWN";
+}
+
+function resolveBlockedReason(error: unknown): BlockedReason {
+  if (error instanceof ScraperError) {
+    return error.reason;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "reason" in error &&
+    isBlockedReason((error as { reason: unknown }).reason)
+  ) {
+    return (error as { reason: BlockedReason }).reason;
+  }
+
+  if (error instanceof Error) {
+    return detectBlockedReason(error.message);
+  }
+
+  return "UNKNOWN";
+}
+
+function isAutoRetryableReason(reason: BlockedReason): boolean {
+  return reason === "TIMEOUT" || reason === "NETWORK_ERROR";
+}
+
+function computeRetryDelayMs(retryCount: number): number {
+  return 2 ** retryCount * 5_000;
 }
 
 async function collectArtifactPaths(workerJobId: string): Promise<{
@@ -309,12 +385,44 @@ async function persistScrapedEntities(params: {
   }
 }
 
+function createJobProgressUpdater(params: {
+  prisma: ReturnType<typeof getPrisma> | null;
+  clientJobId?: string;
+}) {
+  const { prisma, clientJobId } = params;
+
+  async function updateProgress(progress: number) {
+    if (!prisma || !clientJobId) {
+      return;
+    }
+
+    try {
+      await prisma.job.update({
+        where: { id: clientJobId },
+        data: {
+          progress: Math.max(0, Math.min(100, Math.round(progress))),
+          lastHeartbeatAt: new Date(),
+        },
+      });
+    } catch {
+      // Ignore progress update failures to keep crawl execution resilient.
+    }
+  }
+
+  return { updateProgress };
+}
+
 class ScraperService {
   private crawlQueue: Map<string, ScrapeJob> = new Map();
+  private readonly workerLoopIntervalMs = 10_000;
+  private readonly hardTimeoutMs = 15 * 60 * 1000;
+  private readonly workerId = `pid-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
 
   constructor() {
     // Memory cleanup: Remove jobs older than 1 hour
     this.startMemoryCleanup();
+    this.startWorkerLoop();
+    console.log(`\x1b[36m[WORKER ${this.workerId}] started\x1b[0m`);
   }
 
   /**
@@ -332,6 +440,141 @@ class ScraperService {
     }, 3600000);
   }
 
+  private startWorkerLoop(): void {
+    setInterval(() => {
+      void this.processRetryQueue();
+      void this.processHardTimeouts();
+    }, this.workerLoopIntervalMs);
+  }
+
+  private async processRetryQueue(): Promise<void> {
+    const prisma = getPrisma();
+    const now = new Date();
+
+    const scheduledJobs = await prisma.job.findMany({
+      where: {
+        status: "PENDING",
+        lockedBy: null,
+        OR: [
+          {
+            retryScheduledFor: {
+              lte: now,
+            },
+          },
+          {
+            retryScheduledFor: null,
+          },
+        ],
+      },
+      select: {
+        id: true,
+        url: true,
+        keyword: true,
+        platform: true,
+        mode: true,
+        requestedProxyRegion: true,
+        debugMode: true,
+        retryScheduledFor: true,
+        createdAt: true,
+      },
+      take: 20,
+      orderBy: [{ retryScheduledFor: "asc" }, { createdAt: "asc" }],
+    });
+
+    for (const job of scheduledJobs) {
+      const retryWorkerJobId = this.generateJobId();
+
+      const lockResult = await prisma.job.updateMany({
+        where: {
+          id: job.id,
+          status: "PENDING",
+          lockedBy: null,
+          ...(job.retryScheduledFor
+            ? {
+                retryScheduledFor: {
+                  lte: now,
+                },
+              }
+            : { retryScheduledFor: null }),
+        },
+        data: {
+          lockedBy: retryWorkerJobId,
+          lockedAt: new Date(),
+          workerJobId: retryWorkerJobId,
+          retryScheduledFor: null,
+        },
+      });
+
+      if (lockResult.count === 0) {
+        continue;
+      }
+
+      console.log(
+        `\x1b[36m[WORKER ${this.workerId}] Picking job ${job.id} (retry=${job.retryScheduledFor ? "yes" : "no"})\x1b[0m`,
+      );
+
+      void this.executeCrawl(retryWorkerJobId, job.url ?? undefined, {
+        clientJobId: job.id,
+        keyword: job.keyword ?? undefined,
+        platform: job.platform,
+        mode: job.mode,
+        proxyRegion: job.requestedProxyRegion,
+        debugMode: job.debugMode,
+        preLocked: true,
+      }).catch((error) => {
+        console.error(
+          `Retry execution ${retryWorkerJobId} failed:`,
+          error?.message ?? error,
+        );
+      });
+    }
+  }
+
+  private async processHardTimeouts(): Promise<void> {
+    const prisma = getPrisma();
+    const staleCutoff = new Date(Date.now() - this.hardTimeoutMs);
+
+    const staleJobs = await prisma.job.findMany({
+      where: {
+        status: "RUNNING",
+        lastHeartbeatAt: {
+          lt: staleCutoff,
+        },
+      },
+      select: {
+        id: true,
+      },
+      take: 100,
+    });
+
+    if (staleJobs.length === 0) {
+      return;
+    }
+
+    await prisma.job.updateMany({
+      where: {
+        status: "RUNNING",
+        lastHeartbeatAt: {
+          lt: staleCutoff,
+        },
+      },
+      data: {
+        status: "FAILED",
+        blockedReason: "TIMEOUT",
+        errorDetail: "Hard timeout: no heartbeat",
+        finishedAt: new Date(),
+        lockedBy: null,
+        lockedAt: null,
+      },
+    });
+
+    for (const staleJob of staleJobs) {
+      console.log(
+        `\x1b[31m[TIMEOUT_KILL] Job ${staleJob.id} killed due to stale heartbeat\x1b[0m`,
+      );
+    }
+  }
+
   /**
    * Generate a unique job ID
    */
@@ -344,22 +587,25 @@ class ScraperService {
    * Starts the crawl asynchronously and returns the jobId immediately
    */
   async addScrapeJob(
-    url: string,
+    url: string | undefined,
     options?: AddScrapeJobOptions,
   ): Promise<string> {
+    const normalizedUrl = url?.trim() ?? "";
     const jobId = this.generateJobId();
 
     // Add initial pending status
     this.crawlQueue.set(jobId, {
-      url,
+      url: normalizedUrl,
       status: "pending",
       timestamp: Date.now(),
     });
 
     // Fire-and-forget crawl job
-    this.executeCrawl(jobId, url, options).catch((error) => {
-      console.error(`Job ${jobId} failed:`, error.message);
-    });
+    this.executeCrawl(jobId, normalizedUrl || undefined, options).catch(
+      (error) => {
+        console.error(`Job ${jobId} failed:`, error.message);
+      },
+    );
 
     return jobId;
   }
@@ -369,15 +615,46 @@ class ScraperService {
    */
   private async executeCrawl(
     jobId: string,
-    url: string,
+    url: string | undefined,
     options?: AddScrapeJobOptions,
   ): Promise<void> {
     const prisma = options?.clientJobId ? getPrisma() : null;
+    const progressUpdater = createJobProgressUpdater({
+      prisma,
+      clientJobId: options?.clientJobId,
+    });
+    let stopProgressHeartbeat: (() => void) | null = null;
 
     try {
       const debugMode =
         options?.debugMode ?? process.env.CRAWLER_DEBUG_MODE === "true";
       const requestedProxyRegion = normalizeProxyRegion(options?.proxyRegion);
+      const platform = normalizePlatform(options?.platform);
+      const mode = normalizeCrawlMode(options?.mode);
+      const keyword = options?.keyword?.trim() || undefined;
+      const preLocked = options?.preLocked === true;
+
+      if (prisma && options?.clientJobId && !preLocked) {
+        const lockResult = await prisma.job.updateMany({
+          where: {
+            id: options.clientJobId,
+            status: "PENDING",
+            lockedBy: null,
+          },
+          data: {
+            lockedBy: jobId,
+            lockedAt: new Date(),
+            workerJobId: jobId,
+          },
+        });
+
+        if (lockResult.count === 0) {
+          throw new ScraperError(
+            "UNKNOWN",
+            "Job lock acquisition failed: already locked or not PENDING",
+          );
+        }
+      }
 
       const selectedProxy = prisma
         ? await selectProxyForRegion({
@@ -387,26 +664,58 @@ class ScraperService {
         : null;
 
       if (prisma && options?.clientJobId) {
-        await prisma.job.update({
-          where: { id: options.clientJobId },
+        const startResult = await prisma.job.updateMany({
+          where: {
+            id: options.clientJobId,
+            lockedBy: jobId,
+          },
           data: {
             status: "RUNNING",
             startedAt: new Date(),
             errorMessage: null,
+            errorDetail: null,
             blockedReason: null,
-            workerJobId: jobId,
+            lockedBy: jobId,
+            lockedAt: new Date(),
+            lastHeartbeatAt: new Date(),
+            platform,
+            mode,
             requestedProxyRegion,
             usedProxyId: selectedProxy?.id ?? null,
             usedProxyAddress: selectedProxy?.address ?? null,
             usedProxyPort: selectedProxy?.port ?? null,
             usedProxyRegion: selectedProxy?.region ?? null,
+            progress: 5,
             debugMode,
           },
         });
+
+        if (startResult.count === 0) {
+          throw new ScraperError(
+            "UNKNOWN",
+            "Job start failed: lock owner mismatch",
+          );
+        }
+      }
+
+      let heartbeatProgress = 10;
+      if (prisma && options?.clientJobId) {
+        const heartbeat = setInterval(() => {
+          if (heartbeatProgress < 45) {
+            heartbeatProgress += 5;
+          }
+
+          // Keep sending heartbeats even at 45% so updatedAt stays fresh.
+          void progressUpdater.updateProgress(heartbeatProgress);
+        }, 15_000);
+
+        stopProgressHeartbeat = () => {
+          clearInterval(heartbeat);
+        };
       }
 
       this.crawlQueue.set(jobId, {
-        url,
+        url: url ?? "",
         status: "running",
         timestamp: Date.now(),
       });
@@ -419,6 +728,9 @@ class ScraperService {
         message: "Job started",
         meta: {
           url,
+          platform,
+          mode,
+          keyword,
           debugMode,
           requestedProxyRegion,
           usedProxy: selectedProxy
@@ -435,13 +747,56 @@ class ScraperService {
       // Create isolated Dataset for this job
       const jobDataset = await Dataset.open(jobId);
 
-      const scraper = createScraperForUrl(url);
+      const scraper = createScraperStrategy({
+        platform,
+        mode,
+        url,
+      });
+
+      if (mode === "DIRECT_URL" && !url) {
+        throw new Error("DIRECT_URL mode requires URL");
+      }
+
+      if (mode === "SEARCH_KEYWORD" && !keyword) {
+        throw new Error("SEARCH_KEYWORD mode requires keyword");
+      }
+
+      const seedUrl =
+        url ??
+        (platform === "GOOGLE"
+          ? "https://www.google.com"
+          : "https://www.facebook.com");
+
       const extracted = await scraper.execute({
         jobId,
-        url,
+        platform,
+        mode,
+        url: seedUrl,
+        keyword,
         debugMode,
         proxy: selectedProxy ?? undefined,
+        onProgress: async (progress, step) => {
+          await progressUpdater.updateProgress(progress);
+
+          if (step) {
+            logJobEvent("info", {
+              jobId,
+              platform: scraper.platform,
+              phase: "scrape",
+              step,
+              message: "Progress heartbeat from scraper loop",
+              meta: { progress },
+            });
+          }
+        },
       });
+
+      if (stopProgressHeartbeat) {
+        stopProgressHeartbeat();
+        stopProgressHeartbeat = null;
+      }
+
+      await progressUpdater.updateProgress(70);
 
       // Push data to the job's isolated Dataset
       await jobDataset.pushData({
@@ -450,11 +805,13 @@ class ScraperService {
         ...extracted,
       });
 
+      await progressUpdater.updateProgress(80);
+
       // Retrieve data from isolated Dataset
       const datasetResults = await jobDataset.getData();
 
       this.crawlQueue.set(jobId, {
-        url,
+        url: url ?? seedUrl,
         status: "done",
         result: datasetResults.items,
         timestamp: Date.now(),
@@ -463,6 +820,8 @@ class ScraperService {
       if (prisma && options?.clientJobId) {
         const clientJobId = options.clientJobId;
         const artifacts = await collectArtifactPaths(jobId);
+
+        await progressUpdater.updateProgress(90);
 
         await persistScrapedEntities({
           prisma,
@@ -487,7 +846,12 @@ class ScraperService {
             ),
             finishedAt: new Date(),
             errorMessage: null,
+            errorDetail: null,
             blockedReason: null,
+            lockedBy: null,
+            lockedAt: null,
+            retryScheduledFor: null,
+            lastHeartbeatAt: new Date(),
           },
         });
 
@@ -528,26 +892,97 @@ class ScraperService {
         await cleanupOldArtifacts(24 * 60 * 60 * 1000);
       }
     } catch (error: any) {
+      if (stopProgressHeartbeat) {
+        stopProgressHeartbeat();
+        stopProgressHeartbeat = null;
+      }
+
       const message = error?.message ?? "Job failed";
+      const detail = error?.stack ? String(error.stack) : null;
+      const blockedReason = resolveBlockedReason(error);
 
       this.crawlQueue.set(jobId, {
-        url,
+        url: url ?? "",
         status: "error",
         error: message,
         timestamp: Date.now(),
       });
 
       if (prisma && options?.clientJobId) {
-        await prisma.job.update({
-          where: { id: options.clientJobId },
-          data: {
-            status: "FAILED",
-            progress: 100,
-            errorMessage: message,
-            blockedReason: detectBlockedReason(message),
-            finishedAt: new Date(),
+        const clientJobId = options.clientJobId;
+        const jobMeta = await prisma.job.findUnique({
+          where: { id: clientJobId },
+          select: {
+            retryCount: true,
+            maxRetry: true,
           },
         });
+
+        const shouldAutoRetry =
+          jobMeta !== null &&
+          isAutoRetryableReason(blockedReason) &&
+          jobMeta.retryCount < jobMeta.maxRetry;
+
+        if (shouldAutoRetry) {
+          const delayMs = computeRetryDelayMs(jobMeta.retryCount);
+          const scheduledFor = new Date(Date.now() + delayMs);
+
+          await prisma.job.update({
+            where: { id: clientJobId },
+            data: {
+              status: "PENDING",
+              progress: 0,
+              retryCount: {
+                increment: 1,
+              },
+              retryScheduledFor: scheduledFor,
+              errorMessage: message,
+              errorDetail: detail,
+              blockedReason,
+              startedAt: null,
+              finishedAt: null,
+              lockedBy: null,
+              lockedAt: null,
+              workerJobId: null,
+              lastHeartbeatAt: new Date(),
+            },
+          });
+
+          logJobEvent("warn", {
+            jobId,
+            platform: "generic",
+            phase: "job",
+            step: "auto-retry-scheduled",
+            message: "Retry scheduled with exponential backoff",
+            meta: {
+              blockedReason,
+              delayMs,
+              retryCount: jobMeta.retryCount + 1,
+              maxRetry: jobMeta.maxRetry,
+              retryScheduledFor: scheduledFor.toISOString(),
+            },
+          });
+
+          console.log(
+            `\x1b[33m[RETRY] Job ${clientJobId} scheduled for ${scheduledFor.toISOString()}\x1b[0m`,
+          );
+        } else {
+          await prisma.job.update({
+            where: { id: clientJobId },
+            data: {
+              status: "FAILED",
+              progress: 100,
+              errorMessage: message,
+              errorDetail: detail,
+              blockedReason,
+              finishedAt: new Date(),
+              lockedBy: null,
+              lockedAt: null,
+              retryScheduledFor: null,
+              lastHeartbeatAt: new Date(),
+            },
+          });
+        }
       }
 
       logJobEvent("error", {
@@ -557,6 +992,10 @@ class ScraperService {
         step: "error",
         message,
       });
+    } finally {
+      if (stopProgressHeartbeat) {
+        stopProgressHeartbeat();
+      }
     }
   }
 

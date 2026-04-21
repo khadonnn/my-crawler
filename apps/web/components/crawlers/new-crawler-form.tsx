@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AlertCircle } from "lucide-react";
 
 type NewCrawlerFormProps = {
   onSuccess?: (jobId: string) => void;
@@ -15,6 +16,12 @@ type CreateCrawlerResponse = {
   success?: boolean;
   jobId?: string;
   error?: string;
+};
+
+type ProxyData = {
+  id: string;
+  status: string;
+  region?: "ANY" | "VN" | "US";
 };
 
 export function NewCrawlerForm({
@@ -30,9 +37,50 @@ export function NewCrawlerForm({
   const [schedule, setSchedule] = useState("");
   const [debugMode, setDebugMode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [hasWorkingProxy, setHasWorkingProxy] = useState(false);
+  const [proxyCheckLoading, setProxyCheckLoading] = useState(true);
+
+  // Check proxies on mount
+  useEffect(() => {
+    const checkProxies = async () => {
+      try {
+        const response = await fetch("/api/proxies");
+        if (response.ok) {
+          const proxies = (await response.json()) as ProxyData[];
+          const hasWorking = proxies.some((p) => p.status === "WORKING");
+          setHasWorkingProxy(hasWorking);
+
+          // Set default region based on available proxies
+          if (hasWorking) {
+            const workingProxies = proxies.filter(
+              (p) => p.status === "WORKING",
+            );
+            const regions = [
+              ...new Set(workingProxies.map((p) => p.region ?? "ANY")),
+            ];
+            // If all working proxies are in same region, use that region
+            if (regions.length === 1 && regions[0] !== "ANY") {
+              setProxyRegion(regions[0] as "ANY" | "VN" | "US");
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch proxies:", error);
+      } finally {
+        setProxyCheckLoading(false);
+      }
+    };
+
+    checkProxies();
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!hasWorkingProxy) {
+      toast.error("Khong co proxy WORKING nao. Vui long import proxy truoc.");
+      return;
+    }
 
     if (!url.trim()) {
       toast.error("Vui long nhap URL can crawl");
@@ -82,6 +130,20 @@ export function NewCrawlerForm({
 
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
+      {proxyCheckLoading ? (
+        <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <span>Đang kiểm tra proxy...</span>
+        </div>
+      ) : !hasWorkingProxy ? (
+        <div className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <span>
+            Không có proxy WORKING nào. Vui lòng import proxy trước khi tạo job.
+          </span>
+        </div>
+      ) : null}
+
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor="crawler-url">
           Target URL
@@ -91,7 +153,7 @@ export function NewCrawlerForm({
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           placeholder="https://www.facebook.com/groups/..."
-          disabled={loading}
+          disabled={loading || !hasWorkingProxy}
         />
       </div>
 
@@ -105,7 +167,7 @@ export function NewCrawlerForm({
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             placeholder="du lich, bat dong san, tuyen dung"
-            disabled={loading}
+            disabled={loading || !hasWorkingProxy}
           />
         </div>
 
@@ -118,7 +180,7 @@ export function NewCrawlerForm({
             value={schedule}
             onChange={(event) => setSchedule(event.target.value)}
             placeholder="0 */4 * * *"
-            disabled={loading}
+            disabled={loading || !hasWorkingProxy}
           />
         </div>
       </div>
@@ -130,7 +192,7 @@ export function NewCrawlerForm({
           </label>
           <select
             id="crawler-scope"
-            className="border-input bg-background ring-offset-background w-full rounded-md border px-3 py-2 text-sm"
+            className="border-input bg-background ring-offset-background w-full rounded-md border px-3 py-2 text-sm disabled:opacity-50"
             value={scrapeMode}
             onChange={(event) =>
               setScrapeMode(
@@ -140,7 +202,7 @@ export function NewCrawlerForm({
                   | "PROFILE_AND_POST",
               )
             }
-            disabled={loading}
+            disabled={loading || !hasWorkingProxy}
           >
             <option value="PROFILE_AND_POST">Profile + Post</option>
             <option value="PROFILE_ONLY">Profile only</option>
@@ -154,12 +216,12 @@ export function NewCrawlerForm({
           </label>
           <select
             id="crawler-proxy-region"
-            className="border-input bg-background ring-offset-background w-full rounded-md border px-3 py-2 text-sm"
+            className="border-input bg-background ring-offset-background w-full rounded-md border px-3 py-2 text-sm disabled:opacity-50"
             value={proxyRegion}
             onChange={(event) =>
               setProxyRegion(event.target.value as "ANY" | "VN" | "US")
             }
-            disabled={loading}
+            disabled={loading || !hasWorkingProxy}
           >
             <option value="ANY">Auto / Any region</option>
             <option value="VN">Vietnam</option>
@@ -175,16 +237,24 @@ export function NewCrawlerForm({
       <label className="flex items-center gap-2 text-sm font-medium">
         <input
           type="checkbox"
-          className="size-4 rounded border"
+          className="size-4 rounded border disabled:opacity-50"
           checked={debugMode}
           onChange={(event) => setDebugMode(event.target.checked)}
-          disabled={loading}
+          disabled={loading || !hasWorkingProxy}
         />
         Bat Debug Mode (luu screenshot + raw extract)
       </label>
 
-      <Button type="submit" disabled={loading} className="w-full">
-        {loading ? "Dang tao job..." : submitLabel}
+      <Button
+        type="submit"
+        disabled={loading || !hasWorkingProxy || proxyCheckLoading}
+        className="w-full"
+      >
+        {proxyCheckLoading
+          ? "Kiem tra proxy..."
+          : loading
+            ? "Dang tao job..."
+            : submitLabel}
       </Button>
     </form>
   );

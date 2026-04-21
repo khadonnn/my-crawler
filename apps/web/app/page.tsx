@@ -1,5 +1,9 @@
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import GettingStartedChecklist from "@/components/dashboard/getting-started-checklist";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
   return (
@@ -13,6 +17,22 @@ export default function Home() {
           gian thực.
         </p>
       </div>
+
+      <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium">Bước 1/5: Trang chủ</p>
+            <p className="text-sm text-muted-foreground">
+              Bắt đầu từ đây, rồi sang bước proxy để tránh crawl trực tiếp bằng
+              IP thật.
+            </p>
+          </div>
+          <Button asChild size="sm">
+            <Link href="/proxies">Đi tới bước Proxy</Link>
+          </Button>
+        </div>
+      </div>
+
       <div className="space-y-3">
         <GettingStartedChecklist />
       </div>

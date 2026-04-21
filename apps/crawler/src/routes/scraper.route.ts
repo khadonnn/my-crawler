@@ -8,8 +8,8 @@ import {
 
 const router = Router();
 
-// API Key from environment
-const API_KEY = process.env.CRAWLER_API_KEY || "your-secret-key";
+// API key is optional in local/dev. If not provided, auth is disabled.
+const API_KEY = process.env.CRAWLER_API_KEY?.trim();
 
 /**
  * Authentication middleware
@@ -20,9 +20,14 @@ const authenticate = (
   res: Response,
   next: NextFunction,
 ): void => {
+  if (!API_KEY) {
+    next();
+    return;
+  }
+
   const key = req.headers["x-api-key"] as string | undefined;
 
-  if (API_KEY && key !== API_KEY) {
+  if (key !== API_KEY) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

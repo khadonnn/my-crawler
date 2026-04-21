@@ -1,5 +1,88 @@
 # FEATURES DONE
 
+## Production Hardening Finalization (Durable Retry + Manual Retry + Timeline)
+
+- Reworked retry execution in worker runtime (`apps/crawler/src/services/scraper.service.ts`):
+  - Removed volatile in-memory delayed retry trigger.
+  - Added periodic durable retry queue processor that picks due jobs from DB (`status=PENDING`, `retryScheduledFor<=now`) and lock-guards dispatch.
+  - Added hard-timeout sweep in worker loop based on `lastHeartbeatAt` (authoritative heartbeat signal) to fail stale `RUNNING` jobs.
+- Added manual retry endpoint `POST /api/jobs/[jobId]/retry`:
+  - Only allows retries for `FAILED` jobs.
+  - Rejects when retry budget is exhausted (`retryCount >= maxRetry`).
+  - Resets runtime state to queued (`status=PENDING`, `retryScheduledFor=now`) without resetting retry history counters.
+- Extended jobs payload server mapping (`apps/web/lib/server/jobs.ts`) with fields needed for ops diagnostics and timeline:
+  - `errorDetail`, `retryScheduledFor`, `lockedAt`, `startedAt`, `finishedAt`, `lastHeartbeatAt`.
+- Updated Crawlers console (`apps/web/components/crawlers/crawlers-console.tsx`):
+  - Added `Retry` button for failed jobs, disabled when retry budget exhausted.
+  - Kept `Rerun` behavior as separate new-job flow.
+- Updated Datasets page (`apps/web/app/datasets/page.tsx`) with job timeline panel:
+  - Shows key lifecycle timestamps and retry scheduling signal for debugging stuck/slow jobs.
+- Validation completed:
+  - `npm --workspace @scraping-platform/crawler run build`
+  - `npm --workspace @scraping-platform/web run build`
+  - Both builds passed.
+
+## Smart Retry + Dashboard Error Visibility - Package 3
+
+- Implemented worker-side smart retry with exponential backoff in `scraper.service.ts`:
+  - `LOGIN_WALL` and `CAPTCHA`: never auto-retry, mark `FAILED` directly.
+  - `TIMEOUT` and `NETWORK_ERROR`: auto-retry only when `retryCount < maxRetry`.
+  - Backoff formula: `delayMs = (2 ** retryCount) * 5000`.
+  - On scheduled retry: set job back to `PENDING`, increment `retryCount`, set `retryScheduledFor`, and clear `lockedBy`/`lockedAt`.
+- Extended jobs list payload for UI diagnostics:
+  - Added `retryCount`, `maxRetry`, and `lockedBy` in server job list mapping.
+- Upgraded Crawlers console UI:
+  - Added failure reason badge for `FAILED` jobs using `blockedReason`.
+  - Added retry progress display (`retryCount/maxRetry`).
+  - Added current lock owner display (`lockedBy`).
+- Upgraded datasets job detail panel (`View Data` flow):
+  - Shows retry ratio (`retryCount/maxRetry`).
+  - Shows current worker lock id (`lockedBy`).
+  - Shows failure reason when status is `FAILED`.
+- Validation completed:
+  - `npm --workspace @scraping-platform/crawler run build`
+  - `npm --workspace @scraping-platform/web run build`
+  - Both builds passed.
+
+## Production Core Runtime - Package 2 (Locking + Heartbeat + Sweep)
+
+- Implemented worker-side job locking guard in `scraper.service.ts`:
+  - Job must be `PENDING` and `lockedBy = null` before execution starts.
+  - Lock acquisition is done with conditional `updateMany` and worker lock metadata (`lockedBy`, `lockedAt`).
+  - Worker only transitions job to `RUNNING` if lock owner matches the current worker job id.
+- Confirmed heartbeat update path writes `lastHeartbeatAt` whenever progress is updated.
+- Added stale job cleanup endpoint `POST /api/jobs/sweep`:
+  - Finds `RUNNING` jobs with stale heartbeat older than 10 minutes.
+  - Uses `lastHeartbeatAt` first, and `lockedAt` fallback if heartbeat has not been written yet.
+  - Marks stale jobs as `FAILED` with `blockedReason = NO_HEARTBEAT`.
+  - Clears lock metadata and stamps finished time.
+- Validation completed:
+  - `npm --workspace @scraping-platform/crawler run build`
+  - `npm --workspace @scraping-platform/web run build`
+  - Both builds passed.
+
+## Production Foundation - Package 1 (DB + Error Classification)
+
+- Upgraded Prisma `Job` schema with production anti-stuck and retry-control fields:
+  - `blockedReason` converted to enum `BlockedReason`.
+  - Added `errorDetail`, `lastHeartbeatAt`, `retryCount`, `maxRetry`, `retryScheduledFor`, `lockedBy`, and `lockedAt`.
+- Added Prisma enum `BlockedReason` with values:
+  - `LOGIN_WALL`, `CAPTCHA`, `TIMEOUT`, `NETWORK_ERROR`, `NO_HEARTBEAT`, `EXTRACTION_LIMIT`, `UNKNOWN`.
+- Added migration `20260421002350_add_job_locking_heartbeat_error_classification` and regenerated Prisma Client.
+- Introduced typed crawler error model at `apps/crawler/src/errors/scraper.error.ts`:
+  - `ScraperError` class with strongly-typed `reason`.
+  - Runtime guard `isBlockedReason`.
+- Integrated typed error classification into crawler execution flow:
+  - `facebook.scraper.ts`: throws `ScraperError` for login/captcha/timeout conditions.
+  - `facebook-search.scraper.ts`: throws `ScraperError` for login wall and selector timeout.
+  - `scraper.service.ts`: maps error -> blocked reason, persists `errorDetail` stack, updates lock and heartbeat metadata.
+- Validation completed:
+  - `npm --workspace @scraping-platform/db run db:migrate -- --name add_job_locking_heartbeat_error_classification`
+  - `npm --workspace @scraping-platform/db run db:generate`
+  - `npm --workspace @scraping-platform/crawler run build`
+  - `npm --workspace @scraping-platform/web run build`
+  - All commands passed.
+
 ## Scraper Worker
 
 - Refactored the monolithic Express scraper into Router - Controller - Service layers.
@@ -172,3 +255,57 @@
 - Checklist uses real Prisma counts for active accounts, total jobs, completed jobs, and interactions.
 - Added per-step badges, action links, and an overall progress bar.
 - Increased the dashboard growth chart minimum height so the layout stays readable with sparse data.
+
+## Multi-Platform Strategy + Factory Foundation (Backward Compatible)
+
+- Extended Prisma `Job` model with routing fields for future multi-platform crawling:
+  - `platform` enum (`FACEBOOK`, `GOOGLE`, `YOUTUBE`, `TIKTOK`) with default `FACEBOOK`.
+  - `mode` enum (`DIRECT_URL`, `SEARCH_KEYWORD`) with default `DIRECT_URL`.
+  - Optional `url` field to support search-first jobs while preserving existing URL-first flow.
+- Updated jobs API validation to use cross-validation by crawl mode:
+  - `DIRECT_URL` requires valid `url`.
+  - `SEARCH_KEYWORD` requires non-empty `keyword`.
+- Kept current UI flow fully compatible by defaulting to `FACEBOOK + DIRECT_URL` when platform/mode is not provided.
+- Updated worker `/api/scrape` contract and service pipeline to accept/pass-through `platform`, `mode`, and `keyword`.
+- Refactored scraper routing to Strategy + Factory style:
+  - Added `createScraperStrategy({ platform, mode, url })` for explicit routing.
+  - Added `FacebookDirectStrategy` preserving existing direct URL behavior.
+  - Added initial `FacebookSearchStrategy` skeleton to execute keyword search navigation flow.
+  - Preserved URL-host fallback routing for backward compatibility.
+- Regenerated Prisma Client and verified both package builds after changes:
+  - `@scraping-platform/crawler` build passes.
+  - `@scraping-platform/web` build passes.
+
+## Job Progress Tracking & Real-Time Visibility
+
+- Implemented GET endpoint `/api/jobs/[jobId]` to fetch individual job details via new route handler.
+- Added progress heartbeat mechanism in crawler worker (`scraper.service.ts`):
+  - Automatic progress updates every 15 seconds (non-blocking async).
+  - Stage-based milestones: 5% (start) → 70% (scrape complete) → 80% (dataset push) → 90% (artifacts) → 100% (finished).
+  - Wrapped in try/catch to prevent blocking job execution on progress DB write failures.
+  - Heartbeat capped at 45% during initial processing phase to avoid falsely showing completion.
+- Enhanced datasets page UI (`apps/web/app/datasets/page.tsx`) with real-time progress tracking:
+  - Visual progress bar (0-100%) with percentage display.
+  - Estimated remaining time (ETA) calculated dynamically from elapsed time ÷ current progress %.
+  - Last update timestamp showing time since last progress change.
+  - Stuck job detection: flags RUNNING jobs with no updates > 5 minutes as potentially stuck.
+  - Visual heartbeat animation: displays 10-25% animated range when actual progress is 0 to indicate job is alive/executing.
+  - Auto-refresh every 1 second via `setInterval` to update ETA countdown in real-time as job progresses.
+  - Delete action for stuck jobs with confirmation dialog.
+- Verified end-to-end heartbeat correctness:
+  - Progress increments by 5% every 15 seconds: 5% → 15% → 20% → 25% → 30% → 35% → 40% → 45%.
+  - Database `updatedAt` timestamp updates on each heartbeat tick.
+  - No blocking delays to crawler execution due to non-awaited progress updates.
+  - Old jobs (pre-heartbeat code) remain at 0% with stale `updatedAt` until marked as stuck and deleted.
+
+## Progress Heartbeat Freshness Fix
+
+- Fixed stale RUNNING jobs at 45% by continuing heartbeat writes after reaching the 45% cap.
+- Worker now keeps updating `updatedAt` every 15 seconds while the long scrape stage is still running.
+- This prevents false "stuck" detection caused only by heartbeat silence at capped progress.
+
+## Proxy Onboarding Step
+
+- Added a 5-step getting-started flow that now begins on `/` and points users to `/proxies` as the second step.
+- Added an onboarding CTA on the home page so users can move straight from the dashboard to proxy setup.
+- Added a next-step CTA on `/proxies` so the onboarding flow continues into account setup instead of stopping at proxy management.

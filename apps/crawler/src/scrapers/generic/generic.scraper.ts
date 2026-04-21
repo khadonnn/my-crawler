@@ -14,6 +14,11 @@ export class GenericScraper extends BaseScraper {
   readonly platform = "generic";
 
   async execute(input: ScrapeExecutionInput): Promise<ScrapeExecutionOutput> {
+    const targetUrl = input.url?.trim();
+    if (!targetUrl) {
+      throw new Error("DIRECT_URL requires url");
+    }
+
     const scraper = this;
     const proxyConfiguration = input.proxy
       ? new ProxyConfiguration({ proxyUrls: [input.proxy.url] })
@@ -36,7 +41,7 @@ export class GenericScraper extends BaseScraper {
             step: "open-url",
             message: "Opening target URL",
             meta: {
-              url: request.loadedUrl ?? input.url,
+              url: request.loadedUrl ?? targetUrl,
               proxy: input.proxy
                 ? {
                     address: input.proxy.address,
@@ -75,7 +80,7 @@ export class GenericScraper extends BaseScraper {
               jobId: input.jobId,
               label: "generic-body",
               payload: {
-                url: request.loadedUrl ?? input.url,
+                url: request.loadedUrl ?? targetUrl,
                 title,
                 content,
               },
@@ -92,7 +97,7 @@ export class GenericScraper extends BaseScraper {
           }
 
           resolve({
-            url: request.loadedUrl ?? input.url,
+            url: request.loadedUrl ?? targetUrl,
             title,
             previewSnippet: scraper.createPreview(content),
             crawledAt: new Date().toISOString(),
@@ -100,7 +105,7 @@ export class GenericScraper extends BaseScraper {
         },
       });
 
-      crawler.run([input.url]).catch(reject);
+      crawler.run([targetUrl]).catch(reject);
     });
   }
 }

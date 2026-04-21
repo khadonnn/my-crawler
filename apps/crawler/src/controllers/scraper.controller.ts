@@ -6,21 +6,38 @@ import { scraperService } from "../services/scraper.service.js";
  * Validates the URL and initiates a scrape job
  */
 export async function handleScrape(req: Request, res: Response): Promise<void> {
-  const { url, debugMode, clientJobId, proxyRegion } = req.body as {
-    url?: string;
-    debugMode?: boolean;
-    clientJobId?: string;
-    proxyRegion?: "ANY" | "VN" | "US";
-  };
+  const { url, keyword, platform, mode, debugMode, clientJobId, proxyRegion } =
+    req.body as {
+      url?: string;
+      keyword?: string;
+      platform?: "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
+      mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
+      debugMode?: boolean;
+      clientJobId?: string;
+      proxyRegion?: "ANY" | "VN" | "US";
+    };
+
+  if (mode === "DIRECT_URL" && (!url || !/^https?:\/\//.test(url))) {
+    res.status(400).json({ error: "DIRECT_URL requires a valid URL" });
+    return;
+  }
+
+  if (mode === "SEARCH_KEYWORD" && !keyword?.trim()) {
+    res.status(400).json({ error: "SEARCH_KEYWORD requires keyword" });
+    return;
+  }
 
   // Validate URL format
-  if (!url || !/^https?:\/\//.test(url)) {
+  if (mode !== "SEARCH_KEYWORD" && (!url || !/^https?:\/\//.test(url))) {
     res.status(400).json({ error: "URL không hợp lệ" });
     return;
   }
 
   try {
     const jobId = await scraperService.addScrapeJob(url, {
+      keyword,
+      platform,
+      mode,
       debugMode,
       clientJobId,
       proxyRegion,

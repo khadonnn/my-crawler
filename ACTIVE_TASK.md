@@ -2,41 +2,50 @@
 
 ## Current Focus
 
-- External file-based memory system initialized for the Scraping Platform MVP.
-- Scraper Worker architecture is documented under `.docs/system-design/`.
-- Monorepo scaffold has been created with `apps/web`, `apps/crawler`, `packages/db`, and `packages/shared`.
-- PostgreSQL Docker and Turbo workspace orchestration are now in place.
-- Dashboard home page has been upgraded to a Bento command center with KPI cards, charts, running task monitor, and quick launch.
-- Web APIs for dashboard telemetry are in place: worker health, proxy health, and aggregated dashboard metrics.
-- Prisma schema now includes a `Proxy` model for proxy pool monitoring.
-- Proxy bulk import now supports paste-and-import for `ip:port:user:pass` lists, including semicolon-delimited input and duplicate-safe bulk insert.
-- Proxy import UX now uses toast notifications and closes modal on successful response; proxy list screen now surfaces `/api/proxies` fetch errors with retry.
-- Crawlers management console is now live on `/crawlers` with advanced create form, job history table, and actions for rerun/stop/view-data.
-- Jobs API surface has been extended with listing and control endpoints: `/api/jobs`, `/api/jobs/[jobId]/rerun`, `/api/jobs/[jobId]/stop`.
-- Multi-platform architecture direction has been documented in `.docs/crawler-plans/07-multi-platform-strategy-refactor.md`.
-- Observability phase is now wired into the crawler worker with structured job logs, debug screenshots, raw extract artifacts, and retention cleanup.
-- Per-job `debugMode` is now plumbed from Web UI/API to Worker execution (including optional rerun override).
-- OCR observability is now integrated in Facebook PoC: screenshot -> OCR text extraction -> persisted OCR artifact file for audit.
-- Storage bootstrap is now present in repo with `.gitkeep` placeholders and ignore rules for runtime artifacts.
-- Cookie Injection foundation is now in place: `Account` model, interactive session generator, and `POST /api/accounts` ingestion API.
-- Prisma env loading is now workspace-aware, so `DATABASE_URL` can be resolved from the repo root when `apps/web` starts in a subdirectory.
-- Cookie import UI is now available with modal-based account session submission and client-side JSON validation.
-- Account management dashboard is now live at `/accounts` with list/update/delete actions.
-- Facebook scraper is now session-aware: loads ACTIVE account session before crawl, falls back to anonymous if unavailable, and updates `lastUsedAt`.
-- Session validation is now in place: detected Facebook login walls auto-mark account status as `EXPIRED`.
-- Dashboard crawl trigger for reactions is now available via `POST /api/crawl/reactions`.
-- Datasets UI now supports end-to-end `View Reactions` flow with auto-trigger crawl and refetch-after-completion.
-- Dashboard now has an onboarding checklist component that explains the scraping flow and shows progress from real Prisma counts.
-- Onboarding checklist now fails soft in dev when `DATABASE_URL` is missing, so the dashboard no longer crashes before env setup.
-- Proxy Region is now implemented end-to-end: proxies can be tagged by region, worker selects proxy by requested region, and jobs store/display the actual proxy used.
+- Final production hardening (durable retry + timeout semantics + operator controls) is completed:
+  - Worker now runs periodic durable retry pickup from DB (`retryScheduledFor <= now`) instead of volatile in-memory delayed retry.
+  - Worker now enforces hard timeout from `lastHeartbeatAt` and marks stale `RUNNING` jobs as `FAILED/TIMEOUT`.
+  - Manual retry API `POST /api/jobs/[jobId]/retry` added with policy checks:
+    - only `FAILED` jobs,
+    - reject when `retryCount >= maxRetry`,
+    - keep retry history (`retryCount/maxRetry`) intact.
+  - Crawlers console now has `Retry` button (disabled when exhausted) and still keeps `Rerun` as separate behavior.
+  - Datasets job detail now includes timeline block (`created/started/heartbeat/update/finished/retry-scheduled/lock`).
+
+- Package 2 (runtime core) is completed:
+  - Worker-side locking to prevent concurrent execution collisions.
+  - Heartbeat field (`lastHeartbeatAt`) refreshed on progress writes.
+  - Stale job cleanup endpoint `POST /api/jobs/sweep` for no-heartbeat failures.
+
+- Package 1 (Production foundation) is completed:
+  - Database schema upgraded with lock, heartbeat, retry and typed blocked reason fields.
+  - Typed scraper error classification integrated into Facebook direct/search strategies.
+  - Build and Prisma generation validated successfully.
+
+- Progress tracking for long-running jobs is now complete with:
+  - Real-time progress bar (0-100%) with heartbeat every 15 seconds.
+  - ETA countdown updated in real-time on the Datasets page.
+  - Stuck job detection (RUNNING > 5 min no update) with delete action.
+  - Visual "alive" heartbeat animation when progress is 0%.
+- All pending improvements resolved; app is in stable working state.
+- Proxy onboarding flow is now added to the dashboard and proxies pages with a 5-step navigation path.
 
 ## Next Step
 
-- Apply new Prisma migration to development database and verify region-based proxy selection behavior with real crawl runs.
+- Add scheduler/cron invocation for `POST /api/jobs/sweep` in production runtime.
+- Add small E2E smoke script to verify: failed -> retry scheduled -> worker restart -> retry still executes.
+
+- Review whether the onboarding flow should also add a CTA on `/accounts` and `/crawlers` for a fully chained route experience.
+- Add full extraction logic for `FacebookSearchStrategy` (collect result posts/comments/reactions from search results).
+- Implement the first non-Facebook search strategy (Google Search or YouTube Search).
+- Extend job history table to show progress bar inline (if time permits).
+- Refactor any remaining backward-compat routes if schema feels too complex.
 
 ## Notes for Resume
 
 - If the next session says "Resume work", read `FEATURES_DONE.md`, `ACTIVE_TASK.md`, and the latest plan file first.
+- Current issue tracker: All major features working. Progress bar verified with multiple jobs hitting 45% (heartbeat capped, awaiting stage completion).
+- To test: Create new job at `/crawlers` → Click "View Data" → Navigate to `/datasets?jobId=<new-id>` → Watch progress bar increment every 15s.
 
 ##
 

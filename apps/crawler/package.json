@@ -27,6 +27,7 @@
     "start:dev": "tsx src/main.ts",
     "gen-session": "tsx src/pocs/gen-session.ts",
     "poc:facebook": "tsx pocs/poc-facebook.ts",
+    "poc:facebook:direct": "tsx src/pocs/poc-facebook-direct.ts",
     "build": "tsc",
     "test": "echo \"Error: oops, the actor has no tests yet, sad!\" && exit 1",
     "postinstall": "npx crawlee install-playwright-browsers"

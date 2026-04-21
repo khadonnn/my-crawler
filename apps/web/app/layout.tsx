@@ -46,7 +46,7 @@ export default async function RootLayout({
               <div className="px-4"> {children}</div>
             </main>
           </SidebarProvider>
-          <Toaster richColors position="top-right" />
+          <Toaster richColors position="top-center" />
         </ThemeProvider>
       </body>
     </html>

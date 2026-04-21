@@ -7,6 +7,147 @@ datasource db {
   provider = "postgresql"
 }
 
+model Job {
+  id                   String        @id @default(uuid())
+  sourceType           JobSourceType
+  sourceValue          String
+  keyword              String?
+  status               JobStatus     @default(PENDING)
+  progress             Int           @default(0)
+  leadCount            Int           @default(0)
+  processedCount       Int           @default(0)
+  errorMessage         String?
+  createdAt            DateTime      @default(now())
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  updatedAt            DateTime      @updatedAt
+  blockedReason        BlockedReason?
+  errorDetail          String?
+  lastHeartbeatAt      DateTime?
+  retryCount           Int           @default(0)
+  maxRetry             Int           @default(2)
+  retryScheduledFor    DateTime?
+  lockedBy             String?
+  lockedAt             DateTime?
+  debugMode            Boolean       @default(false)
+  workerJobId          String?       @unique
+  requestedProxyRegion ProxyRegion   @default(ANY)
+  usedProxyId          String?
+  usedProxyAddress     String?
+  usedProxyPort        Int?
+  usedProxyRegion      ProxyRegion?
+  mode                 CrawlMode     @default(DIRECT_URL)
+  platform             Platform      @default(FACEBOOK)
+  url                  String?
+  interactions         Interaction[]
+  artifacts            JobArtifact[]
+  posts                Post[]
+  profiles             Profile[]
+
+  @@index([status])
+  @@index([sourceType])
+}
+
+model JobArtifact {
+  id        String          @id @default(uuid())
+  jobId     String
+  type      JobArtifactType
+  path      String
+  metadata  Json?
+  createdAt DateTime        @default(now())
+  job       Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([type])
+}
+
+model Post {
+  id             String        @id @default(uuid())
+  jobId          String?
+  fbPostId       String        @unique
+  postUrl        String
+  authorName     String
+  content        String?
+  keywordMatched String?
+  scrapedAt      DateTime      @default(now())
+  interactions   Interaction[]
+  job            Job?          @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
+}
+
+model Profile {
+  id               String        @id @default(uuid())
+  jobId            String?
+  fbUid            String        @unique
+  name             String
+  profileUrl       String
+  gender           String?
+  currentCity      String?
+  hometown         String?
+  workplace        String?
+  education        String?
+  instagramUrl     String?
+  otherLinks       Json?
+  isProfileScraped Boolean       @default(false)
+  leadScore        Int           @default(0)
+  lastUpdated      DateTime      @updatedAt
+  email            String?
+  phone            String?
+  interactions     Interaction[]
+  job              Job?          @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
+}
+
+model Interaction {
+  id           String    @id @default(uuid())
+  jobId        String?
+  commentText  String?
+  profileId    String
+  postId       String
+  interactedAt DateTime?
+  scrapedAt    DateTime  @default(now())
+  fbCommentId  String?   @unique
+  type         String
+  reactionType String?
+  job          Job?      @relation(fields: [jobId], references: [id])
+  post         Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  profile      Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, postId, type], name: "unique_reaction")
+  @@index([jobId])
+  @@index([profileId])
+  @@index([postId])
+}
+
+model Proxy {
+  id          String      @id @default(uuid())
+  address     String
+  port        Int
+  username    String?
+  password    String?
+  protocol    String      @default("http")
+  status      String      @default("UNKNOWN")
+  latency     Int         @default(0)
+  lastChecked DateTime    @default(now())
+  createdAt   DateTime    @default(now())
+  region      ProxyRegion @default(ANY)
+
+  @@unique([address, port])
+}
+
+model Account {
+  id          String    @id @default(cuid())
+  platform    String
+  name        String
+  sessionData Json
+  status      String    @default("ACTIVE")
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
 enum JobStatus {
   PENDING
   RUNNING
@@ -45,138 +186,24 @@ enum ProxyRegion {
   US
 }
 
-model Job {
-  id              String    @id @default(uuid())
-  workerJobId     String?   @unique
-  sourceType      JobSourceType
-  sourceValue     String
-  keyword         String?
-  requestedProxyRegion ProxyRegion @default(ANY)
-  usedProxyId     String?
-  usedProxyAddress String?
-  usedProxyPort   Int?
-  usedProxyRegion ProxyRegion?
-  debugMode       Boolean   @default(false)
-  status          JobStatus @default(PENDING)
-  progress        Int       @default(0)
-  leadCount       Int       @default(0)
-  processedCount  Int       @default(0)
-  errorMessage    String?   @db.Text
-  blockedReason   String?   @db.Text
-  createdAt       DateTime  @default(now())
-  startedAt       DateTime?
-  finishedAt      DateTime?
-  updatedAt       DateTime  @updatedAt
-
-  posts           Post[]
-  profiles        Profile[]
-  interactions    Interaction[]
-  artifacts       JobArtifact[]
-
-  @@index([status])
-  @@index([sourceType])
+enum Platform {
+  FACEBOOK
+  GOOGLE
+  YOUTUBE
+  TIKTOK
 }
 
-model JobArtifact {
-  id          String          @id @default(uuid())
-  jobId        String
-  type         JobArtifactType
-  path         String
-  metadata     Json?
-  createdAt    DateTime        @default(now())
-
-  job          Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  @@index([jobId])
-  @@index([type])
+enum CrawlMode {
+  DIRECT_URL
+  SEARCH_KEYWORD
 }
 
-model Post {
-  id              String        @id @default(uuid())
-  fbPostId        String        @unique
-  postUrl         String
-  authorName      String
-  content         String?       @db.Text
-  keywordMatched  String?
-  jobId           String?
-  scrapedAt       DateTime      @default(now())
-
-  job             Job?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  interactions    Interaction[]
-
-  @@index([jobId])
-}
-
-model Profile {
-  id               String        @id @default(uuid())
-  fbUid            String        @unique
-  name             String
-  profileUrl       String
-  gender           String?
-  currentCity      String?
-  hometown         String?
-  workplace        String?
-  education        String?
-  phone            String?
-  email            String?
-  instagramUrl     String?
-  otherLinks       Json?
-  isProfileScraped Boolean       @default(false)
-  leadScore        Int           @default(0)
-  jobId            String?
-  lastUpdated      DateTime      @updatedAt
-
-  job              Job?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  interactions     Interaction[]
-
-  @@index([jobId])
-}
-
-model Interaction {
-  id             String          @id @default(uuid())
-  type           String
-  reactionType   String?
-  fbCommentId    String?         @unique
-  commentText    String?         @db.Text
-  profileId      String
-  postId         String
-  jobId          String?
-  interactedAt   DateTime?
-  scrapedAt      DateTime        @default(now())
-
-  job            Job?            @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  profile        Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  post           Post            @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@index([jobId])
-  @@index([profileId])
-  @@index([postId])
-  @@unique([profileId, postId, type], name: "unique_reaction")
-}
-
-model Proxy {
-  id          String   @id @default(uuid())
-  address     String
-  port        Int
-  region      ProxyRegion @default(ANY)
-  username    String?
-  password    String?
-  protocol    String   @default("http")
-  status      String   @default("UNKNOWN")
-  latency     Int      @default(0)
-  lastChecked DateTime @default(now())
-  createdAt   DateTime @default(now())
-
-  @@unique([address, port])
-}
-
-model Account {
-  id          String   @id @default(cuid())
-  platform    String
-  name        String
-  sessionData Json
-  status      String   @default("ACTIVE")
-  lastUsedAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum BlockedReason {
+  LOGIN_WALL
+  CAPTCHA
+  TIMEOUT
+  NETWORK_ERROR
+  NO_HEARTBEAT
+  EXTRACTION_LIMIT
+  UNKNOWN
 }

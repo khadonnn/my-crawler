@@ -3,8 +3,10 @@ import { getPrisma } from "@scraping-platform/db";
 const FALLBACK_WORKER_URL = "http://localhost:10000";
 
 type CreateCrawlerJobInput = {
-  url: string;
+  url?: string;
   keyword?: string;
+  platform?: "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
+  mode?: "DIRECT_URL" | "SEARCH_KEYWORD";
   scrapeMode?: "PROFILE_ONLY" | "POST_ONLY" | "PROFILE_AND_POST";
   proxyRegion?: "ANY" | "VN" | "US";
   schedule?: string;
@@ -14,8 +16,11 @@ type CreateCrawlerJobInput = {
 export type JobListItem = {
   id: string;
   workerJobId: string | null;
+  platform: "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
+  mode: "DIRECT_URL" | "SEARCH_KEYWORD";
   sourceType: string;
   sourceValue: string;
+  url: string | null;
   keyword: string | null;
   requestedProxyRegion: "ANY" | "VN" | "US";
   usedProxyId: string | null;
@@ -29,6 +34,15 @@ export type JobListItem = {
   processedCount: number;
   errorMessage: string | null;
   blockedReason: string | null;
+  errorDetail: string | null;
+  retryCount: number;
+  maxRetry: number;
+  retryScheduledFor: string | null;
+  lockedBy: string | null;
+  lockedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastHeartbeatAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -69,22 +83,33 @@ async function parseWorkerError(response: Response) {
 }
 
 export async function createCrawlerJob(input: CreateCrawlerJobInput) {
-  const url = input.url.trim();
+  const url = normalizeOptionalText(input.url);
   const keyword = normalizeOptionalText(input.keyword);
+  const platform = input.platform ?? "FACEBOOK";
+  const mode = input.mode ?? "DIRECT_URL";
   const scrapeMode = input.scrapeMode ?? "PROFILE_AND_POST";
   const proxyRegion = input.proxyRegion ?? "ANY";
   const schedule = normalizeOptionalText(input.schedule);
   const debugMode = Boolean(input.debugMode);
 
-  if (!url || !/^https?:\/\//.test(url)) {
-    throw new Error("URL khong hop le");
+  if (mode === "DIRECT_URL" && (!url || !/^https?:\/\//.test(url))) {
+    throw new Error("DIRECT_URL requires valid url");
   }
+
+  if (mode === "SEARCH_KEYWORD" && !keyword) {
+    throw new Error("SEARCH_KEYWORD requires keyword");
+  }
+
+  const sourceValue = url ?? keyword ?? "";
 
   const prisma = getPrisma();
   const job = await prisma.job.create({
     data: {
-      sourceType: keyword ? "KEYWORD" : "GROUP_URL",
-      sourceValue: url,
+      platform,
+      mode,
+      sourceType: mode === "SEARCH_KEYWORD" ? "KEYWORD" : "GROUP_URL",
+      sourceValue,
+      url: url ?? null,
       keyword: keyword ?? null,
       requestedProxyRegion: proxyRegion,
       status: "PENDING",
@@ -100,6 +125,8 @@ export async function createCrawlerJob(input: CreateCrawlerJobInput) {
       body: JSON.stringify({
         url,
         keyword,
+        platform,
+        mode,
         scrapeMode,
         proxyRegion,
         schedule,
@@ -154,8 +181,11 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
       select: {
         id: true,
         workerJobId: true,
+        platform: true,
+        mode: true,
         sourceType: true,
         sourceValue: true,
+        url: true,
         keyword: true,
         requestedProxyRegion: true,
         usedProxyId: true,
@@ -169,6 +199,15 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
         processedCount: true,
         errorMessage: true,
         blockedReason: true,
+        errorDetail: true,
+        retryCount: true,
+        maxRetry: true,
+        retryScheduledFor: true,
+        lockedBy: true,
+        lockedAt: true,
+        startedAt: true,
+        finishedAt: true,
+        lastHeartbeatAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -201,8 +240,11 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
     return {
       id: job.id,
       workerJobId: job.workerJobId,
+      platform: job.platform,
+      mode: job.mode,
       sourceType: job.sourceType,
       sourceValue: job.sourceValue,
+      url: job.url,
       keyword: job.keyword,
       requestedProxyRegion: job.requestedProxyRegion,
       usedProxyId: job.usedProxyId,
@@ -216,6 +258,15 @@ export async function listCrawlerJobs(limit = 100): Promise<JobListItem[]> {
       processedCount: job.processedCount,
       errorMessage: job.errorMessage,
       blockedReason: job.blockedReason,
+      errorDetail: job.errorDetail,
+      retryCount: job.retryCount,
+      maxRetry: job.maxRetry,
+      retryScheduledFor: job.retryScheduledFor?.toISOString() ?? null,
+      lockedBy: job.lockedBy,
+      lockedAt: job.lockedAt?.toISOString() ?? null,
+      startedAt: job.startedAt?.toISOString() ?? null,
+      finishedAt: job.finishedAt?.toISOString() ?? null,
+      lastHeartbeatAt: job.lastHeartbeatAt?.toISOString() ?? null,
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt.toISOString(),
     };
@@ -249,7 +300,10 @@ export async function rerunCrawlerJob(
     where: { id: jobId },
     select: {
       sourceValue: true,
+      url: true,
       keyword: true,
+      platform: true,
+      mode: true,
       requestedProxyRegion: true,
       debugMode: true,
     },
@@ -260,8 +314,10 @@ export async function rerunCrawlerJob(
   }
 
   return createCrawlerJob({
-    url: existing.sourceValue,
+    url: existing.url ?? existing.sourceValue,
     keyword: existing.keyword ?? undefined,
+    platform: existing.platform,
+    mode: existing.mode,
     proxyRegion: existing.requestedProxyRegion,
     debugMode: options?.debugMode ?? existing.debugMode,
   });

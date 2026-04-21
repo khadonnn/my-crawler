@@ -4,6 +4,29 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+function isMissingAccountTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybeCode = "code" in error ? (error as { code?: unknown }).code : null;
+  if (maybeCode === "P2021") {
+    return true;
+  }
+
+  const maybeMessage =
+    "message" in error ? (error as { message?: unknown }).message : null;
+  if (typeof maybeMessage !== "string") {
+    return false;
+  }
+
+  const lower = maybeMessage.toLowerCase();
+  return (
+    (lower.includes("public.account") || lower.includes(" table `public.account`")) &&
+    lower.includes("does not exist")
+  );
+}
+
 export async function GET() {
   try {
     const prisma = getPrisma();
@@ -22,6 +45,10 @@ export async function GET() {
 
     return NextResponse.json(accounts);
   } catch (error) {
+    if (isMissingAccountTableError(error)) {
+      return NextResponse.json([]);
+    }
+
     const message =
       error instanceof Error ? error.message : "Unable to fetch accounts";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -298,6 +325,16 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (isMissingAccountTableError(error)) {
+      return NextResponse.json(
+        {
+          error:
+            "Database chua khoi tao bang Account. Hay chay migration truoc khi import cookie.",
+        },
+        { status: 503 },
+      );
+    }
+
     const message =
       error instanceof Error ? error.message : "Unable to create account";
     return NextResponse.json({ error: message }, { status: 500 });

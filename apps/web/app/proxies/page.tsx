@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -6,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { ImportProxyDialog } from "@/components/proxies/import-proxy-dialog";
 import { ProxiesTable } from "@/components/proxies/proxies-table";
 import { useState } from "react";
@@ -20,6 +22,21 @@ export default function ProxiesPage() {
         <p className="text-muted-foreground">
           Quản lý proxy pool và kiểm tra tình trạng khả dụng của từng proxy.
         </p>
+      </div>
+
+      <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium">Bước 2/5: Cấu hình proxy</p>
+            <p className="text-sm text-muted-foreground">
+              Sau khi có proxy, đi tiếp sang bước cấp quyền truy cập để crawler
+              có thể chạy ổn định hơn.
+            </p>
+          </div>
+          <Button asChild size="sm">
+            <Link href="/accounts">Đi tới bước Cấp quyền</Link>
+          </Button>
+        </div>
       </div>
 
       <Card>

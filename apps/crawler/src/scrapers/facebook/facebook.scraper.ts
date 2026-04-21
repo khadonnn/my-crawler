@@ -16,6 +16,7 @@ import {
   logJobEvent,
   saveRawExtract,
 } from "../../observability/index.js";
+import { ScraperError } from "../../errors/scraper.error.js";
 
 type AccountSession = {
   id: string;
@@ -41,6 +42,68 @@ type ExtractedReactionCandidate = {
   reactionType: "LIKE" | "LOVE" | "HAHA" | "WOW" | "SAD" | "ANGRY";
   profileNameHint?: string;
 };
+
+const FAST_LOCAL_MODE = process.env.CRAWLER_FAST_LOCAL_MODE === "true";
+
+const FB_HANDLER_TIMEOUT_SECS = FAST_LOCAL_MODE ? 30 : 45;
+const FB_NETWORKIDLE_TIMEOUT_MS = FAST_LOCAL_MODE ? 7_000 : 15_000;
+const FB_DOMCONTENT_TIMEOUT_MS = FAST_LOCAL_MODE ? 5_000 : 10_000;
+
+const FB_MAX_COMMENT_SCAN_NODES = FAST_LOCAL_MODE ? 120 : 320;
+const FB_MAX_COMMENT_RESULTS = FAST_LOCAL_MODE ? 20 : 30;
+const FB_MAX_REACTION_SCAN_NODES = FAST_LOCAL_MODE ? 120 : 280;
+const FB_MAX_REACTION_RESULTS = FAST_LOCAL_MODE ? 12 : 20;
+const FB_MAX_SCROLL = FAST_LOCAL_MODE ? 2 : 15;
+const FB_SCROLL_WAIT_MS = FAST_LOCAL_MODE ? 700 : 2_000;
+const FB_GLOBAL_TIMEOUT_MS = 60_000;
+
+async function withTimeout<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      task,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new ScraperError("TIMEOUT", message));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+async function detectBlockedReasonOnPage(
+  page: Page,
+): Promise<"LOGIN_WALL" | "CAPTCHA" | null> {
+  const currentUrl = page.url().toLowerCase();
+  if (
+    currentUrl.includes("login") ||
+    currentUrl.includes("checkpoint") ||
+    currentUrl.includes("recover")
+  ) {
+    return "LOGIN_WALL";
+  }
+
+  const loginFormCount = await page
+    .locator('form[action*="login"], input[name="email"], input[name="pass"]')
+    .count();
+  if (loginFormCount > 0) {
+    return "LOGIN_WALL";
+  }
+
+  const captchaCount = await page
+    .locator('iframe[src*="captcha"], div[id*="captcha"]')
+    .count();
+  return captchaCount > 0 ? "CAPTCHA" : null;
+}
 
 function toStableNumericHash(value: string): string {
   let hash = 0;
@@ -141,34 +204,32 @@ async function extractProfileCandidates(
 ): Promise<ExtractedProfileCandidate[]> {
   return page.evaluate(() => {
     const anchors = Array.from(
-      document.querySelectorAll<HTMLAnchorElement>('a[href*="facebook.com"]'),
+      document.querySelectorAll('a[href*="facebook.com"]'),
     );
 
-    const mapped = anchors
-      .map((anchor) => {
-        const name = (anchor.textContent ?? "").trim().replace(/\s+/g, " ");
-        const href = anchor.href;
+    const mapped = [];
+    for (const anchor of anchors) {
+      const htmlAnchor = anchor as HTMLAnchorElement;
+      const name = (htmlAnchor.textContent ?? "").trim().replace(/\s+/g, " ");
+      const href = htmlAnchor.href;
 
-        if (!name || name.length < 2 || name.length > 80) {
-          return null;
-        }
+      if (!name || name.length < 2 || name.length > 80) {
+        continue;
+      }
 
-        if (!href.includes("facebook.com") || href.includes("/plugins/")) {
-          return null;
-        }
+      if (!href.includes("facebook.com") || href.includes("/plugins/")) {
+        continue;
+      }
 
-        if (href.includes("/help") || href.includes("/privacy")) {
-          return null;
-        }
+      if (href.includes("/help") || href.includes("/privacy")) {
+        continue;
+      }
 
-        return {
-          name,
-          profileUrl: href,
-        };
-      })
-      .filter(
-        (item): item is { name: string; profileUrl: string } => item !== null,
-      );
+      mapped.push({
+        name,
+        profileUrl: href,
+      });
+    }
 
     const seen = new Set<string>();
     const unique: Array<{ name: string; profileUrl: string }> = [];
@@ -193,191 +254,194 @@ async function extractProfileCandidates(
 async function extractCommentCandidates(
   page: Page,
 ): Promise<ExtractedCommentCandidate[]> {
-  return page.evaluate(() => {
-    const toCommentId = (element: HTMLElement): string | undefined => {
-      const attrCandidates = [
-        element.getAttribute("data-commentid"),
-        element.getAttribute("data-comment-id"),
-        element.getAttribute("id"),
-      ].filter((value): value is string => Boolean(value));
+  return page.evaluate(
+    (limits) => {
+      const nodes = Array.from(
+        document.querySelectorAll(
+          'ul li div[dir="auto"], div[role="article"] div[dir="auto"], div[data-ad-preview="message"]',
+        ),
+      ).slice(0, limits.maxScanNodes);
 
-      for (const value of attrCandidates) {
-        const direct = value.match(/(\d{8,})/)?.[1];
-        if (direct) {
-          return direct;
-        }
-      }
-
-      const anchor = element.querySelector<HTMLAnchorElement>(
-        'a[href*="comment_id="], a[href*="/comment/"]',
-      );
-      if (anchor?.href) {
-        const commentId = anchor.href.match(/comment_id=(\d+)/i)?.[1];
-        if (commentId) {
-          return commentId;
-        }
-
-        const routeId = anchor.href.match(/\/comment\/(\d+)/i)?.[1];
-        if (routeId) {
-          return routeId;
-        }
-      }
-
-      return undefined;
-    };
-
-    const nodes = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        'ul li div[dir="auto"], div[role="article"] div[dir="auto"], div[data-ad-preview="message"]',
-      ),
-    );
-
-    const values = nodes
-      .map((node): ExtractedCommentCandidate | null => {
-        const text = (node.innerText ?? "").trim().replace(/\s+/g, " ");
+      const values = [];
+      for (const node of nodes) {
+        const htmlNode = node as HTMLElement;
+        const text = (htmlNode.innerText ?? "").trim().replace(/\s+/g, " ");
         if (text.length < 8 || text.length > 500) {
-          return null;
+          continue;
         }
 
         if (/^https?:\/\//i.test(text)) {
-          return null;
+          continue;
         }
 
-        return {
-          fbCommentId: toCommentId(node),
+        let fbCommentId;
+        const attrCandidates = [
+          htmlNode.getAttribute("data-commentid"),
+          htmlNode.getAttribute("data-comment-id"),
+          htmlNode.getAttribute("id"),
+        ].filter(Boolean);
+
+        for (const value of attrCandidates) {
+          const direct = value && value.match(/(\d{8,})/)?.[1];
+          if (direct) {
+            fbCommentId = direct;
+            break;
+          }
+        }
+
+        if (!fbCommentId) {
+          const anchor = htmlNode.querySelector(
+            'a[href*="comment_id="], a[href*="/comment/"]',
+          ) as HTMLAnchorElement | null;
+          if (anchor?.href) {
+            fbCommentId = anchor.href.match(/comment_id=(\d+)/i)?.[1];
+
+            if (!fbCommentId) {
+              fbCommentId = anchor.href.match(/\/comment\/(\d+)/i)?.[1];
+            }
+          }
+        }
+
+        values.push({
+          fbCommentId,
           text,
-        };
-      })
-      .filter((item): item is ExtractedCommentCandidate => item !== null);
-
-    const seen = new Set<string>();
-    const unique: ExtractedCommentCandidate[] = [];
-
-    for (const value of values) {
-      const dedupKey = `${value.fbCommentId ?? "none"}::${value.text}`;
-      if (seen.has(dedupKey)) {
-        continue;
+        });
       }
 
-      seen.add(dedupKey);
-      unique.push(value);
+      const seen = new Set<string>();
+      const unique: ExtractedCommentCandidate[] = [];
 
-      if (unique.length >= 30) {
-        break;
+      for (const value of values) {
+        const dedupKey = `${value.fbCommentId ?? "none"}::${value.text}`;
+        if (seen.has(dedupKey)) {
+          continue;
+        }
+
+        seen.add(dedupKey);
+        unique.push(value);
+
+        if (unique.length >= limits.maxResults) {
+          break;
+        }
       }
-    }
 
-    return unique;
-  });
+      return unique;
+    },
+    {
+      maxScanNodes: FB_MAX_COMMENT_SCAN_NODES,
+      maxResults: FB_MAX_COMMENT_RESULTS,
+    },
+  );
 }
 
 async function extractReactionCandidates(
   page: Page,
 ): Promise<ExtractedReactionCandidate[]> {
-  return page.evaluate(() => {
-    const iconToType = new Map<string, string>([
-      ["like", "LIKE"],
-      ["thumb", "LIKE"],
-      ["love", "LOVE"],
-      ["heart", "LOVE"],
-      ["haha", "HAHA"],
-      ["laugh", "HAHA"],
-      ["wow", "WOW"],
-      ["care", "SAD"],
-      ["sad", "SAD"],
-      ["angry", "ANGRY"],
-    ]);
+  return page.evaluate(
+    (limits) => {
+      const iconToType = new Map<string, string>([
+        ["like", "LIKE"],
+        ["thumb", "LIKE"],
+        ["love", "LOVE"],
+        ["heart", "LOVE"],
+        ["haha", "HAHA"],
+        ["laugh", "HAHA"],
+        ["wow", "WOW"],
+        ["care", "SAD"],
+        ["sad", "SAD"],
+        ["angry", "ANGRY"],
+      ]);
 
-    const fromLabel = (label: string): string | null => {
-      const normalized = label.toLowerCase();
-      if (normalized.includes("love") || normalized.includes("thương")) {
-        return "LOVE";
-      }
-      if (
-        normalized.includes("haha") ||
-        normalized.includes("cười") ||
-        normalized.includes("laugh")
-      ) {
-        return "HAHA";
-      }
-      if (normalized.includes("wow") || normalized.includes("ngạc nhiên")) {
-        return "WOW";
-      }
-      if (
-        normalized.includes("sad") ||
-        normalized.includes("buồn") ||
-        normalized.includes("care")
-      ) {
-        return "SAD";
-      }
-      if (
-        normalized.includes("angry") ||
-        normalized.includes("phẫn nộ") ||
-        normalized.includes("giận")
-      ) {
-        return "ANGRY";
-      }
-      if (
-        normalized.includes("like") ||
-        normalized.includes("thích") ||
-        normalized.includes("reaction")
-      ) {
-        return "LIKE";
-      }
+      const nodes = Array.from(
+        document.querySelectorAll(
+          '[aria-label*="Like"], [aria-label*="love"], [aria-label*="haha"], [aria-label*="wow"], [aria-label*="sad"], [aria-label*="angry"], [aria-label*="Thích"], [aria-label*="thương"], [aria-label*="phẫn nộ"], [aria-label*="buồn"], [data-visualcompletion="ignore-dynamic"]',
+        ),
+      ).slice(0, limits.maxScanNodes);
 
-      return null;
-    };
+      const reactions: ExtractedReactionCandidate[] = [];
 
-    const nodes = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        '[aria-label*="Like"], [aria-label*="love"], [aria-label*="haha"], [aria-label*="wow"], [aria-label*="sad"], [aria-label*="angry"], [aria-label*="Thích"], [aria-label*="thương"], [aria-label*="phẫn nộ"], [aria-label*="buồn"], [data-visualcompletion="ignore-dynamic"]',
-      ),
-    );
+      for (const node of nodes) {
+        const htmlNode = node as HTMLElement;
+        const ariaLabel =
+          htmlNode.getAttribute("aria-label") ||
+          htmlNode.getAttribute("alt") ||
+          htmlNode.textContent ||
+          "";
 
-    const reactions: ExtractedReactionCandidate[] = [];
+        const normalized = ariaLabel.toLowerCase();
+        let reactionType = null;
+        if (normalized.includes("love") || normalized.includes("thương")) {
+          reactionType = "LOVE";
+        } else if (
+          normalized.includes("haha") ||
+          normalized.includes("cười") ||
+          normalized.includes("laugh")
+        ) {
+          reactionType = "HAHA";
+        } else if (
+          normalized.includes("wow") ||
+          normalized.includes("ngạc nhiên")
+        ) {
+          reactionType = "WOW";
+        } else if (
+          normalized.includes("sad") ||
+          normalized.includes("buồn") ||
+          normalized.includes("care")
+        ) {
+          reactionType = "SAD";
+        } else if (
+          normalized.includes("angry") ||
+          normalized.includes("phẫn nộ") ||
+          normalized.includes("giận")
+        ) {
+          reactionType = "ANGRY";
+        } else if (
+          normalized.includes("like") ||
+          normalized.includes("thích") ||
+          normalized.includes("reaction")
+        ) {
+          reactionType = "LIKE";
+        }
 
-    for (const node of nodes) {
-      const ariaLabel =
-        node.getAttribute("aria-label") ||
-        node.getAttribute("alt") ||
-        node.textContent ||
-        "";
+        if (!reactionType) {
+          const iconText = [
+            htmlNode.getAttribute("data-icon"),
+            htmlNode.getAttribute("xlink:href"),
+            htmlNode.className,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
 
-      let reactionType = fromLabel(ariaLabel);
-      if (!reactionType) {
-        const iconText = [
-          node.getAttribute("data-icon"),
-          node.getAttribute("xlink:href"),
-          node.className,
-        ]
-          .filter((value): value is string => Boolean(value))
-          .join(" ")
-          .toLowerCase();
-
-        for (const [iconKey, mapped] of iconToType.entries()) {
-          if (iconText.includes(iconKey)) {
-            reactionType = mapped;
-            break;
+          for (const [iconKey, mapped] of iconToType.entries()) {
+            if (iconText.includes(iconKey)) {
+              reactionType = mapped;
+              break;
+            }
           }
+        }
+
+        if (!reactionType) {
+          continue;
+        }
+
+        reactions.push({
+          reactionType:
+            reactionType as ExtractedReactionCandidate["reactionType"],
+        });
+
+        if (reactions.length >= limits.maxResults) {
+          break;
         }
       }
 
-      if (!reactionType) {
-        continue;
-      }
-
-      reactions.push({
-        reactionType:
-          reactionType as ExtractedReactionCandidate["reactionType"],
-      });
-
-      if (reactions.length >= 20) {
-        break;
-      }
-    }
-
-    return reactions;
-  });
+      return reactions;
+    },
+    {
+      maxScanNodes: FB_MAX_REACTION_SCAN_NODES,
+      maxResults: FB_MAX_REACTION_RESULTS,
+    },
+  );
 }
 
 function buildEntities(params: {
@@ -501,6 +565,11 @@ export class FacebookScraper extends BaseScraper {
   readonly platform = "facebook";
 
   async execute(input: ScrapeExecutionInput): Promise<ScrapeExecutionOutput> {
+    const targetUrl = input.url?.trim();
+    if (!targetUrl) {
+      throw new ScraperError("UNKNOWN", "DIRECT_URL requires url");
+    }
+
     const scraper = this;
     const proxyConfiguration = input.proxy
       ? new ProxyConfiguration({ proxyUrls: [input.proxy.url] })
@@ -565,7 +634,7 @@ export class FacebookScraper extends BaseScraper {
           retireBrowserAfterPageCount: 10,
         },
         maxRequestsPerCrawl: 1,
-        requestHandlerTimeoutSecs: 45,
+        requestHandlerTimeoutSecs: FB_HANDLER_TIMEOUT_SECS,
         headless: true,
         proxyConfiguration,
         preNavigationHooks: storageState
@@ -574,132 +643,237 @@ export class FacebookScraper extends BaseScraper {
                 await applyStorageState(
                   page,
                   storageState,
-                  request.loadedUrl ?? input.url,
+                  request.loadedUrl ?? targetUrl,
                 );
               },
             ]
           : undefined,
         async requestHandler({ page, request, log }) {
-          logJobEvent("info", {
-            jobId: input.jobId,
-            platform: "facebook",
-            phase: "navigate",
-            step: "open-url",
-            message: "Opening target URL",
-            meta: {
-              url: request.loadedUrl ?? input.url,
-              proxy: input.proxy
-                ? {
-                    address: input.proxy.address,
-                    port: input.proxy.port,
-                    region: input.proxy.region,
-                  }
-                : null,
-            },
-          });
-          log.info(`[${input.jobId}][facebook] Crawling: ${request.loadedUrl}`);
+          const output = await withTimeout(
+            (async (): Promise<ScrapeExecutionOutput> => {
+              const reportProgress = async (progress: number, step: string) => {
+                if (input.onProgress) {
+                  await input.onProgress(progress, step);
+                }
+              };
 
-          try {
-            await page.waitForLoadState("networkidle", { timeout: 15000 });
-          } catch {
-            await page.waitForLoadState("domcontentloaded", { timeout: 10000 });
-          }
+              log.info(`STEP 1: Open URL ${request.loadedUrl ?? targetUrl}`);
+              logJobEvent("info", {
+                jobId: input.jobId,
+                platform: "facebook",
+                phase: "navigate",
+                step: "open-url",
+                message: "Opening target URL",
+                meta: {
+                  url: request.loadedUrl ?? targetUrl,
+                  proxy: input.proxy
+                    ? {
+                        address: input.proxy.address,
+                        port: input.proxy.port,
+                        region: input.proxy.region,
+                      }
+                    : null,
+                },
+              });
+              await reportProgress(50, "step-open-url");
 
-          const currentUrl = page.url();
-          if (account && prisma && currentUrl.toLowerCase().includes("login")) {
-            await prisma.account.update({
-              where: { id: account.id },
-              data: { status: "EXPIRED" },
-            });
+              log.info("STEP 2: Wait page stable");
+              try {
+                await page.waitForLoadState("networkidle", {
+                  timeout: FB_NETWORKIDLE_TIMEOUT_MS,
+                });
+              } catch {
+                try {
+                  await page.waitForLoadState("domcontentloaded", {
+                    timeout: FB_DOMCONTENT_TIMEOUT_MS,
+                  });
+                } catch {
+                  throw new ScraperError(
+                    "TIMEOUT",
+                    "Facebook page did not become stable in time",
+                  );
+                }
+              }
 
-            logJobEvent("warn", {
-              jobId: input.jobId,
-              platform: "facebook",
-              phase: "auth",
-              step: "login-wall-detected",
-              message: "Detected login wall, account marked as EXPIRED",
-              meta: {
-                accountId: account.id,
-                url: currentUrl,
-              },
-            });
-          }
+              const blockedReason = await detectBlockedReasonOnPage(page);
+              if (blockedReason) {
+                throw new ScraperError(
+                  blockedReason,
+                  `Facebook blocked access: ${blockedReason}`,
+                );
+              }
 
-          if (input.debugMode) {
-            const screenshotPath = await captureJobScreenshot({
-              page,
-              jobId: input.jobId,
-              label: "facebook-loaded",
-            });
+              const currentUrl = page.url();
+              if (
+                account &&
+                prisma &&
+                currentUrl.toLowerCase().includes("login")
+              ) {
+                await prisma.account.update({
+                  where: { id: account.id },
+                  data: { status: "EXPIRED" },
+                });
 
-            logJobEvent("info", {
-              jobId: input.jobId,
-              platform: "facebook",
-              phase: "observe",
-              step: "screenshot",
-              message: "Captured debug screenshot",
-              meta: { screenshotPath },
-            });
-          }
+                logJobEvent("warn", {
+                  jobId: input.jobId,
+                  platform: "facebook",
+                  phase: "auth",
+                  step: "login-wall-detected",
+                  message: "Detected login wall, account marked as EXPIRED",
+                  meta: {
+                    accountId: account.id,
+                    url: currentUrl,
+                  },
+                });
+              }
 
-          const title = await page.title();
-          const feedExists =
-            (await page.locator(FACEBOOK_SELECTORS.feedRoot).count()) > 0;
-          const rawText = await page
-            .locator(FACEBOOK_SELECTORS.fallbackBody)
-            .innerText();
-          const profileCandidates = await extractProfileCandidates(page);
-          const commentCandidates = await extractCommentCandidates(page);
-          const reactionCandidates = await extractReactionCandidates(page);
-          const entities = buildEntities({
-            url: request.loadedUrl ?? input.url,
-            title,
-            rawText,
-            profileCandidates,
-            commentCandidates,
-            reactionCandidates,
-          });
+              await reportProgress(55, "step-page-stable");
 
-          if (input.debugMode) {
-            const rawExtractPath = await saveRawExtract({
-              jobId: input.jobId,
-              label: "facebook-body",
-              payload: {
-                url: request.loadedUrl ?? input.url,
+              if (input.debugMode) {
+                log.info("STEP 2.5: Capture debug screenshot");
+                const screenshotPath = await captureJobScreenshot({
+                  page,
+                  jobId: input.jobId,
+                  label: "facebook-loaded",
+                });
+
+                logJobEvent("info", {
+                  jobId: input.jobId,
+                  platform: "facebook",
+                  phase: "observe",
+                  step: "screenshot",
+                  message: "Captured debug screenshot",
+                  meta: { screenshotPath },
+                });
+              }
+
+              log.info("STEP 3: Scroll + extract with limits");
+              const profileMap = new Map<string, ExtractedProfileCandidate>();
+              const commentMap = new Map<string, ExtractedCommentCandidate>();
+              const reactionList: ExtractedReactionCandidate[] = [];
+              let rawText = "";
+
+              for (
+                let scrollCount = 0;
+                scrollCount < FB_MAX_SCROLL;
+                scrollCount += 1
+              ) {
+                if (scrollCount > 0) {
+                  await page.mouse.wheel(0, 2_000);
+                  await page.waitForTimeout(FB_SCROLL_WAIT_MS);
+                }
+
+                const blockedReason = await detectBlockedReasonOnPage(page);
+                if (blockedReason) {
+                  throw new ScraperError(
+                    blockedReason,
+                    `Facebook blocked during scroll: ${blockedReason}`,
+                  );
+                }
+
+                const loopRawText = await page
+                  .locator(FACEBOOK_SELECTORS.fallbackBody)
+                  .innerText();
+                if (loopRawText.length > rawText.length) {
+                  rawText = loopRawText;
+                }
+
+                const profiles = await extractProfileCandidates(page);
+                const comments = await extractCommentCandidates(page);
+                const reactions = await extractReactionCandidates(page);
+
+                for (const profile of profiles) {
+                  profileMap.set(profile.profileUrl, profile);
+                }
+
+                for (const comment of comments) {
+                  const key = `${comment.fbCommentId ?? "none"}::${comment.text}`;
+                  commentMap.set(key, comment);
+                }
+
+                reactionList.splice(
+                  0,
+                  reactionList.length,
+                  ...[...reactionList, ...reactions].slice(
+                    0,
+                    FB_MAX_REACTION_RESULTS,
+                  ),
+                );
+
+                const loopProgress = Math.min(
+                  68,
+                  55 + Math.round(((scrollCount + 1) / FB_MAX_SCROLL) * 13),
+                );
+                await reportProgress(loopProgress, `scroll-${scrollCount + 1}`);
+                log.info(
+                  `STEP 3: Scrolling (${scrollCount + 1}/${FB_MAX_SCROLL})`,
+                );
+              }
+
+              log.info("STEP 4: Build entities");
+              const title = await page.title();
+              const feedExists =
+                (await page.locator(FACEBOOK_SELECTORS.feedRoot).count()) > 0;
+              const entities = buildEntities({
+                url: request.loadedUrl ?? targetUrl,
                 title,
-                feedExists,
                 rawText,
-              },
-            });
+                profileCandidates: [...profileMap.values()],
+                commentCandidates: [...commentMap.values()],
+                reactionCandidates: reactionList,
+              });
 
-            logJobEvent("info", {
-              jobId: input.jobId,
-              platform: "facebook",
-              phase: "observe",
-              step: "raw-extract",
-              message: "Saved raw extract snapshot",
-              meta: { rawExtractPath },
-            });
-          }
+              if (input.debugMode) {
+                log.info("STEP 5: Save raw extract");
+                const rawExtractPath = await saveRawExtract({
+                  jobId: input.jobId,
+                  label: "facebook-body",
+                  payload: {
+                    url: request.loadedUrl ?? targetUrl,
+                    title,
+                    feedExists,
+                    rawText,
+                    scrollLoops: FB_MAX_SCROLL,
+                    fastLocalMode: FAST_LOCAL_MODE,
+                  },
+                });
 
-          if (prisma && account) {
-            await prisma.account.update({
-              where: { id: account.id },
-              data: { lastUsedAt: new Date() },
-            });
-          }
+                logJobEvent("info", {
+                  jobId: input.jobId,
+                  platform: "facebook",
+                  phase: "observe",
+                  step: "raw-extract",
+                  message: "Saved raw extract snapshot",
+                  meta: { rawExtractPath },
+                });
+              }
 
-          resolve({
-            url: request.loadedUrl ?? input.url,
-            title: feedExists ? `[Feed] ${title}` : title,
-            previewSnippet: scraper.createPreview(rawText),
-            crawledAt: new Date().toISOString(),
-            entities,
-          });
+              if (prisma && account) {
+                await prisma.account.update({
+                  where: { id: account.id },
+                  data: { lastUsedAt: new Date() },
+                });
+              }
+
+              await reportProgress(69, "step-ready-to-persist");
+
+              return {
+                url: request.loadedUrl ?? targetUrl,
+                title: feedExists ? `[Feed] ${title}` : title,
+                previewSnippet: scraper.createPreview(rawText),
+                crawledAt: new Date().toISOString(),
+                entities,
+              };
+            })(),
+            FB_GLOBAL_TIMEOUT_MS,
+            "Scrape timeout",
+          );
+
+          resolve(output);
         },
       });
 
-      crawler.run([input.url]).catch(reject);
+      crawler.run([targetUrl]).catch(reject);
     });
   }
 }

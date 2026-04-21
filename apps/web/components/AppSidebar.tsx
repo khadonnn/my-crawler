@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { useEffect, useState } from "react";
 import {
   Activity,
   CircleUserRound,
@@ -54,6 +55,51 @@ const mainItems = [
 
 const AppSidebar = () => {
   const router = useRouter();
+  const [runningJobsCount, setRunningJobsCount] = useState(0);
+  const [proxyStatus, setProxyStatus] = useState<"ACTIVE" | "PENDING">(
+    "PENDING",
+  );
+
+  useEffect(() => {
+    // Fetch running jobs count
+    const fetchRunningJobs = async () => {
+      try {
+        const response = await fetch("/api/jobs");
+        if (response.ok) {
+          const jobs = (await response.json()) as Array<{ status: string }>;
+          const running = jobs.filter((j) => j.status === "RUNNING").length;
+          setRunningJobsCount(running);
+        }
+      } catch (error) {
+        console.error("Failed to fetch running jobs:", error);
+      }
+    };
+
+    // Fetch proxy status
+    const fetchProxyStatus = async () => {
+      try {
+        const response = await fetch("/api/proxies");
+        if (response.ok) {
+          const proxies = (await response.json()) as Array<{ status: string }>;
+          const hasWorking = proxies.some((p) => p.status === "WORKING");
+          setProxyStatus(hasWorking ? "ACTIVE" : "PENDING");
+        }
+      } catch (error) {
+        console.error("Failed to fetch proxies:", error);
+      }
+    };
+
+    fetchRunningJobs();
+    fetchProxyStatus();
+
+    // Refresh every 10 seconds
+    const interval = setInterval(() => {
+      fetchRunningJobs();
+      fetchProxyStatus();
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <Sidebar collapsible="icon">
@@ -111,10 +157,11 @@ const AppSidebar = () => {
                   My Crawlers
                 </SidebarMenuButton>
                 <Badge
-                  variant="secondary"
+                  variant={runningJobsCount > 0 ? "default" : "secondary"}
                   className="ml-auto rounded-full px-2 py-0"
                 >
-                  3 Active
+                  {runningJobsCount}{" "}
+                  {runningJobsCount === 1 ? "Running" : "Running"}
                 </Badge>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -149,10 +196,12 @@ const AppSidebar = () => {
                       <Shield />
                       <span>Proxies / IPs</span>
                       <Badge
-                        variant="outline"
+                        variant={
+                          proxyStatus === "ACTIVE" ? "default" : "secondary"
+                        }
                         className="ml-auto rounded-full px-2 py-0"
                       >
-                        ACTIVE
+                        {proxyStatus}
                       </Badge>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

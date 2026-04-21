@@ -1,4 +1,6 @@
 export type ProxyRegion = "ANY" | "VN" | "US";
+export type Platform = "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
+export type CrawlMode = "DIRECT_URL" | "SEARCH_KEYWORD";
 
 export interface SelectedProxyConfig {
   id: string;
@@ -11,9 +13,13 @@ export interface SelectedProxyConfig {
 
 export interface ScrapeExecutionInput {
   jobId: string;
-  url: string;
+  platform?: Platform;
+  mode?: CrawlMode;
+  url?: string;
+  keyword?: string;
   debugMode?: boolean;
   proxy?: SelectedProxyConfig;
+  onProgress?: (progress: number, step?: string) => Promise<void> | void;
 }
 
 export interface ScrapedPostEntity {
