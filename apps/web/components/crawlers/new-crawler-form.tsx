@@ -231,72 +231,97 @@ export function NewCrawlerForm({
         </div>
       ) : null}
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">Mode</p>
-        <div className="grid gap-2 md:grid-cols-2">
-          <div className="space-y-2">
+      <div className="space-y-4">
+        {" "}
+        {/* Tăng khoảng cách giữa các khối lớn */}
+        {/* HÀNG TRÊN: PROXY COUNTRY (Full width) */}
+        <div className="space-y-2">
+          <label
+            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            htmlFor="crawler-target-country"
+          >
+            Proxy Country
+          </label>
+          <select
+            id="crawler-target-country"
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            value={targetCountry}
+            onChange={(event) => setTargetCountry(event.target.value)}
+            disabled={loading || !hasWorkingProxy}
+          >
+            <option value="AUTO">🌍 Auto (Random)</option>
+            {countryStats.map((country) => (
+              <option key={country.countryCode} value={country.countryCode}>
+                {getCountryFlag(country.countryCode)} {country.countryCode} (
+                {country.count} proxies)
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-muted-foreground">
+            Worker sẽ ưu tiên proxy từ quốc gia này để tránh bị login
+            wall/checkpoint.
+          </p>
+        </div>
+        <hr className="my-2 border-muted/50" />{" "}
+        {/* Thêm một đường kẻ mờ để phân khu cho đẹp */}
+        {/* HÀNG DƯỚI: MODE SELECTION (2 cột song song) */}
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Crawler Mode</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Option: URL Trực tiếp */}
             <label
-              className="text-sm font-medium"
-              htmlFor="crawler-target-country"
+              className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-all hover:bg-muted/50 ${
+                mode === "DIRECT_URL"
+                  ? "border-primary bg-primary/5 ring-1 ring-primary"
+                  : ""
+              }`}
             >
-              Proxy Country
+              <input
+                type="radio"
+                name="crawler-mode"
+                value="DIRECT_URL"
+                checked={mode === "DIRECT_URL"}
+                onChange={() => setMode("DIRECT_URL")}
+                disabled={loading || !hasWorkingProxy}
+                className="mt-1 size-4 accent-primary"
+              />
+              <div className="space-y-1">
+                <span className="block font-semibold text-sm">
+                  URL Trực tiếp
+                </span>
+                <span className="block text-xs text-muted-foreground leading-relaxed">
+                  Crawl một trang cá nhân, hội nhóm hoặc bài viết cụ thể.
+                </span>
+              </div>
             </label>
-            <select
-              id="crawler-target-country"
-              className="border-input bg-background ring-offset-background w-full rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-              value={targetCountry}
-              onChange={(event) => setTargetCountry(event.target.value)}
-              disabled={loading || !hasWorkingProxy}
+
+            {/* Option: Tìm theo từ khóa */}
+            <label
+              className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-all hover:bg-muted/50 ${
+                mode === "SEARCH_KEYWORD"
+                  ? "border-primary bg-primary/5 ring-1 ring-primary"
+                  : ""
+              }`}
             >
-              <option value="AUTO">🌍 Auto (Random)</option>
-              {countryStats.map((country) => (
-                <option key={country.countryCode} value={country.countryCode}>
-                  {getCountryFlag(country.countryCode)} {country.countryCode} (
-                  {country.count} proxies)
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Worker se uu tien proxy theo quoc gia nay neu ban khong chi dinh
-              proxy cu the.
-            </p>
+              <input
+                type="radio"
+                name="crawler-mode"
+                value="SEARCH_KEYWORD"
+                checked={mode === "SEARCH_KEYWORD"}
+                onChange={() => setMode("SEARCH_KEYWORD")}
+                disabled={loading || !hasWorkingProxy}
+                className="mt-1 size-4 accent-primary"
+              />
+              <div className="space-y-1">
+                <span className="block font-semibold text-sm">
+                  Tìm theo từ khóa
+                </span>
+                <span className="block text-xs text-muted-foreground leading-relaxed">
+                  Sử dụng tính năng tìm kiếm của nền tảng để quét lead mới.
+                </span>
+              </div>
+            </label>
           </div>
-
-          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <input
-              type="radio"
-              name="crawler-mode"
-              value="DIRECT_URL"
-              checked={mode === "DIRECT_URL"}
-              onChange={() => setMode("DIRECT_URL")}
-              disabled={loading || !hasWorkingProxy}
-              className="mt-0.5"
-            />
-            <span>
-              <span className="block font-medium">URL Truc tiep</span>
-              <span className="text-xs text-muted-foreground">
-                Crawl 1 URL bai viet/trang cu the.
-              </span>
-            </span>
-          </label>
-
-          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <input
-              type="radio"
-              name="crawler-mode"
-              value="SEARCH_KEYWORD"
-              checked={mode === "SEARCH_KEYWORD"}
-              onChange={() => setMode("SEARCH_KEYWORD")}
-              disabled={loading || !hasWorkingProxy}
-              className="mt-0.5"
-            />
-            <span>
-              <span className="block font-medium">Tim theo tu khoa</span>
-              <span className="text-xs text-muted-foreground">
-                Search keyword va crawl tu dong.
-              </span>
-            </span>
-          </label>
         </div>
       </div>
 
