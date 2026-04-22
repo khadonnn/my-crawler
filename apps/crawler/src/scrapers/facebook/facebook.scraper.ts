@@ -39,14 +39,19 @@ type ExtractedProfileCandidate = {
   profileUrl: string;
 };
 
+// FIX: Thêm dấu ? cho name và profileUrl vì hàm extractCommentCandidates không trả về chúng
 type ExtractedCommentCandidate = {
+  name?: string;
+  profileUrl?: string;
+  commentText: string;
   fbCommentId?: string;
-  text: string;
 };
 
+// FIX: Thêm dấu ? cho name và profileUrl
 type ExtractedReactionCandidate = {
-  reactionType: "LIKE" | "LOVE" | "HAHA" | "WOW" | "SAD" | "ANGRY";
-  profileNameHint?: string;
+  name?: string;
+  profileUrl?: string;
+  reactionType: string;
 };
 
 const FAST_LOCAL_MODE = process.env.CRAWLER_FAST_LOCAL_MODE === "true";
@@ -286,9 +291,10 @@ async function extractCommentCandidates(
           }
         }
 
+        // FIX: Đổi 'text' thành 'commentText' để khớp với interface
         values.push({
           fbCommentId,
-          text,
+          commentText: text,
         });
         commentsCount += 1;
 
@@ -301,13 +307,13 @@ async function extractCommentCandidates(
       const unique: ExtractedCommentCandidate[] = [];
 
       for (const value of values) {
-        const dedupKey = `${value.fbCommentId ?? "none"}::${value.text}`;
+        const dedupKey = `${value.fbCommentId ?? "none"}::${value.commentText}`;
         if (seen.has(dedupKey)) {
           continue;
         }
 
         seen.add(dedupKey);
-        unique.push(value);
+        unique.push(value as ExtractedCommentCandidate);
 
         if (unique.length >= limits.maxResults) {
           break;
@@ -321,6 +327,170 @@ async function extractCommentCandidates(
       maxResults: FB_MAX_COMMENT_RESULTS,
     },
   );
+}
+
+async function extractCommentsWithUsers(
+  page: Page,
+): Promise<ExtractedCommentCandidate[]> {
+  return page.evaluate(() => {
+    const commentNodes = Array.from(
+      document.querySelectorAll(
+        'div[role="article"], ul[role="list"] > li, div[data-ad-preview="message"]',
+      ),
+    );
+
+    const comments: Array<{
+      name: string;
+      profileUrl: string;
+      commentText: string;
+      fbCommentId?: string;
+    }> = [];
+
+    for (const node of commentNodes) {
+      const userLink = node.querySelector(
+        'a[href*="facebook.com"]',
+      ) as HTMLAnchorElement;
+      if (!userLink) continue;
+
+      const name = userLink.textContent?.trim() || "";
+      const profileUrl = userLink.href;
+
+      if (!name || name.length < 2 || !profileUrl.includes("facebook.com")) {
+        continue;
+      }
+
+      const textNode = node.querySelector('div[dir="auto"]') as HTMLElement;
+      if (!textNode) continue;
+
+      const commentText = textNode.innerText?.trim() || "";
+      if (commentText.length < 1 || commentText.length > 500) {
+        continue;
+      }
+
+      let fbCommentId: string | undefined;
+      const commentIdAttr = (node as HTMLElement).getAttribute(
+        "data-commentid",
+      );
+      if (commentIdAttr) {
+        fbCommentId = commentIdAttr;
+      } else {
+        const replyLink = node.querySelector(
+          'a[href*="comment_id="]',
+        ) as HTMLAnchorElement;
+        if (replyLink) {
+          const match = replyLink.href.match(/comment_id=(\d+)/);
+          if (match) {
+            fbCommentId = match[1];
+          }
+        }
+      }
+
+      comments.push({
+        name,
+        profileUrl,
+        commentText,
+        fbCommentId,
+      });
+
+      if (comments.length >= 50) break;
+    }
+
+    return comments;
+  });
+}
+
+async function extractReactionsWithUsers(
+  page: Page,
+  postUrl: string,
+): Promise<ExtractedReactionCandidate[]> {
+  return page.evaluate(() => {
+    const results: Array<{
+      name: string;
+      profileUrl: string;
+      reactionType: string;
+    }> = [];
+
+    try {
+      // FIX: Ép kiểu as HTMLElement để có thể gọi hàm click()
+      const reactionsButton = document.querySelector(
+        '[aria-label*="reaction"], [aria-label*="cảm xúc"], a[href*="/ufi/reaction"]',
+      ) as HTMLElement | null;
+
+      if (!reactionsButton) {
+        console.log("No reactions button found");
+        return [];
+      }
+
+      reactionsButton.click();
+
+      new Promise((resolve) => setTimeout(resolve, 2000));
+
+      const popup = document.querySelector(
+        '[role="dialog"], [role="complementary"]',
+      );
+      if (popup) {
+        for (let i = 0; i < 3; i++) {
+          (popup as HTMLElement).scrollTop = (
+            popup as HTMLElement
+          ).scrollHeight;
+          new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+
+      const items = Array.from(
+        document.querySelectorAll(
+          '[role="dialog"] a[href*="facebook.com"], [role="complementary"] a[href*="facebook.com"]',
+        ),
+      );
+
+      for (const item of items) {
+        const anchor = item as HTMLAnchorElement;
+        const name = anchor.textContent?.trim() || "";
+        const profileUrl = anchor.href;
+
+        if (!name || name.length < 2 || !profileUrl.includes("facebook.com")) {
+          continue;
+        }
+
+        const parent = anchor.closest(
+          '[role="listitem"], li, div[data-visualcompletion]',
+        );
+        if (!parent) continue;
+
+        const ariaLabel = parent.getAttribute("aria-label") || "";
+        let reactionType = "LIKE";
+
+        if (ariaLabel.includes("love") || ariaLabel.includes("thương")) {
+          reactionType = "LOVE";
+        } else if (ariaLabel.includes("haha") || ariaLabel.includes("cười")) {
+          reactionType = "HAHA";
+        } else if (
+          ariaLabel.includes("wow") ||
+          ariaLabel.includes("ngạc nhiên")
+        ) {
+          reactionType = "WOW";
+        } else if (ariaLabel.includes("sad") || ariaLabel.includes("buồn")) {
+          reactionType = "SAD";
+        } else if (
+          ariaLabel.includes("angry") ||
+          ariaLabel.includes("phẫn nộ")
+        ) {
+          reactionType = "ANGRY";
+        }
+
+        results.push({ name, profileUrl, reactionType });
+
+        if (results.length >= 50) break;
+      }
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      new Promise((resolve) => setTimeout(resolve, 500));
+    } catch (error) {
+      console.error("Failed to extract reactions with users:", error);
+    }
+
+    return results;
+  });
 }
 
 async function extractReactionCandidates(
@@ -414,6 +584,7 @@ async function extractReactionCandidates(
           continue;
         }
 
+        // Đã được match với interface có chứa name?, profileUrl?
         reactions.push({
           reactionType:
             reactionType as ExtractedReactionCandidate["reactionType"],
@@ -441,18 +612,47 @@ function buildEntities(params: {
   commentCandidates: ExtractedCommentCandidate[];
   reactionCandidates: ExtractedReactionCandidate[];
 }): ScrapedEntities {
-  const profiles: ScrapedProfileEntity[] = params.profileCandidates
-    .map((item) => ({
-      fbUid: parseFacebookProfileUid(item.profileUrl),
+  const profileMap = new Map<string, ScrapedProfileEntity>();
+
+  for (const item of params.profileCandidates) {
+    const fbUid = parseFacebookProfileUid(item.profileUrl);
+    profileMap.set(fbUid, {
+      fbUid,
       name: item.name,
       profileUrl: item.profileUrl,
-    }))
-    .filter((item) => Boolean(item.fbUid && item.name && item.profileUrl));
+    });
+  }
 
-  const fallbackAuthor =
-    profiles[0]?.name ||
-    params.title.replace(/^\[Feed\]\s*/i, "").trim() ||
-    "Facebook User";
+  // FIX: Chỉ extract profile map nếu có profileUrl
+  for (const comment of params.commentCandidates) {
+    if (comment.profileUrl && comment.name) {
+      const fbUid = parseFacebookProfileUid(comment.profileUrl);
+      if (!profileMap.has(fbUid)) {
+        profileMap.set(fbUid, {
+          fbUid,
+          name: comment.name,
+          profileUrl: comment.profileUrl,
+        });
+      }
+    }
+  }
+
+  for (const reaction of params.reactionCandidates) {
+    if (reaction.profileUrl && reaction.name) {
+      const fbUid = parseFacebookProfileUid(reaction.profileUrl);
+      if (!profileMap.has(fbUid)) {
+        profileMap.set(fbUid, {
+          fbUid,
+          name: reaction.name,
+          profileUrl: reaction.profileUrl,
+        });
+      }
+    }
+  }
+
+  const profiles = Array.from(profileMap.values());
+
+  const fallbackAuthor = profiles[0]?.name || params.title || "Facebook User";
   const post: ScrapedPostEntity = {
     fbPostId: parseFacebookPostId(params.url),
     postUrl: params.url,
@@ -460,47 +660,43 @@ function buildEntities(params: {
     content: params.rawText.slice(0, 2000),
   };
 
-  const availableProfiles =
-    profiles.length > 0
-      ? profiles
-      : [
-          {
-            fbUid: `u-${toStableNumericHash(params.url)}`,
-            name: fallbackAuthor,
-            profileUrl: params.url,
-          },
-        ];
+  const commentInteractions: ScrapedInteractionEntity[] =
+    params.commentCandidates.map((comment) => {
+      // Dùng fallback ID nếu profileUrl null
+      const profileFbUid = comment.profileUrl
+        ? parseFacebookProfileUid(comment.profileUrl)
+        : "u-unknown-commenter";
 
-  const comments = params.commentCandidates.slice(0, FB_MAX_COMMENT_RESULTS);
-  const commentInteractions: ScrapedInteractionEntity[] = comments.map(
-    (comment, index) => ({
-      type: "COMMENT",
-      fbCommentId:
-        comment.fbCommentId ??
-        `c-${post.fbPostId}-${toStableNumericHash(`${comment.text}-${index}`)}`,
-      fbPostId: post.fbPostId,
-      commentText: comment.text,
-      profileFbUid: availableProfiles[index % availableProfiles.length].fbUid,
-    }),
-  );
+      return {
+        type: "COMMENT",
+        fbCommentId:
+          comment.fbCommentId ??
+          `c-${post.fbPostId}-${toStableNumericHash(comment.commentText)}`,
+        fbPostId: post.fbPostId,
+        commentText: comment.commentText,
+        profileFbUid,
+      };
+    });
 
   const reactionInteractions: ScrapedInteractionEntity[] =
-    params.reactionCandidates.slice(0, 10).map((reaction, index) => {
-      const normalizedReactionType = normalizeReactionTypeFromLabel(
-        reaction.reactionType,
-      );
+    params.reactionCandidates.map((reaction) => {
+      // Dùng fallback ID nếu profileUrl null
+      const profileFbUid = reaction.profileUrl
+        ? parseFacebookProfileUid(reaction.profileUrl)
+        : "u-unknown-reactor";
 
       return {
         type: "REACTION",
-        reactionType: normalizedReactionType ?? "LIKE",
+        reactionType:
+          normalizeReactionTypeFromLabel(reaction.reactionType) ?? "LIKE",
         fbPostId: post.fbPostId,
-        profileFbUid: availableProfiles[index % availableProfiles.length].fbUid,
+        profileFbUid,
       };
     });
 
   return {
     posts: [post],
-    profiles: availableProfiles,
+    profiles,
     interactions: [...commentInteractions, ...reactionInteractions],
   };
 }
@@ -818,7 +1014,7 @@ export class FacebookScraper extends BaseScraper {
                 }
 
                 for (const comment of comments) {
-                  const key = `${comment.fbCommentId ?? "none"}::${comment.text}`;
+                  const key = `${comment.fbCommentId ?? "none"}::${comment.commentText}`;
                   commentMap.set(key, comment);
 
                   if (commentMap.size >= FB_MAX_COMMENT_RESULTS) {

@@ -1,5 +1,12 @@
 export type ProxyRegion = "ANY" | "VN" | "US";
-export type Platform = "FACEBOOK" | "GOOGLE" | "YOUTUBE" | "TIKTOK";
+export type Platform =
+  | "FACEBOOK"
+  | "GOOGLE"
+  | "YOUTUBE"
+  | "TIKTOK"
+  | "VOZ"
+  | "TINHTE"
+  | "TIKTOK";
 export type CrawlMode = "DIRECT_URL" | "SEARCH_KEYWORD";
 
 export interface SelectedProxyConfig {

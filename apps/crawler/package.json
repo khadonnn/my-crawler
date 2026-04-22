@@ -12,7 +12,8 @@
     "express-rate-limit": "^8.3.2",
     "geoip-lite": "^2.0.1",
     "playwright": "1.58.2",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "@scraper/queue": "*"
   },
   "devDependencies": {
     "@apify/tsconfig": "^0.1.0",

@@ -1,0 +1,10 @@
+{
+  "name": "@scraper/queue",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "bullmq": "^5.76.0",
+    "ioredis": "^5.4.1"
+  }
+}
